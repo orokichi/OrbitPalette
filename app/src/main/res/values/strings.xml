@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">Orbit Palette</string>
-    <string name="a11y_desc">Orbit Palette のスクリーンショットを、毎回の許可なしで撮影するために使います。画面の内容を読み取ったり送信したりはしません。</string>
+    <string name="app_name">Android AirCommand</string>
+    <string name="a11y_desc">Android AirCommand の ScreenShot・TouchView・ScreenNote を毎回の確認なしで使うためと、ロック画面のダブルタップでメモを開くために使います。画面の内容を送信することはありません。</string>
 </resources>

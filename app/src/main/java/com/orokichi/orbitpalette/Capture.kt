@@ -52,6 +52,8 @@ object FrameHub {
 
     fun snapshot(): Bitmap? = latest?.let { Bitmap.createBitmap(it, 0, 0, contentWidth.coerceAtMost(it.width), it.height) }
 
+    fun setStatic(b: Bitmap) { latest = b; contentWidth = b.width; version.value = version.value + 1 }
+
     fun clear() { latest = null; spare = null; tmp = null }
 }
 
@@ -90,7 +92,7 @@ class CaptureService : Service() {
         mode = intent.getStringExtra("mode") ?: "shot"
         Notif.ensure(this)
         val n = NotificationCompat.Builder(this, Notif.CH).setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(if (mode == "loupe") "タッチビュー実行中" else "スクリーンショット").setOngoing(true).build()
+            .setContentTitle(if (mode == "loupe") "TouchView 実行中" else "ScreenShot").setOngoing(true).build()
         ServiceCompat.startForeground(this, 2, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         val data = IntentCompat.getParcelableExtra(intent, "data", Intent::class.java)
         if (data == null) { fail(); return START_NOT_STICKY }
@@ -111,7 +113,8 @@ class CaptureService : Service() {
         if (mode == "loupe") main.post { OverlayService.instance?.onLoupeStart() }
         else handler.postDelayed({
             val bmp = FrameHub.snapshot()
-            if (bmp != null) {
+            if (mode == "cb") main.post { OverlayService.instance?.deliverCapture(bmp) }
+            else if (bmp != null) {
                 val f = File(cacheDir, "shot_${System.currentTimeMillis()}.png")
                 f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 main.post { OverlayService.instance?.onShotDone(f.absolutePath) }

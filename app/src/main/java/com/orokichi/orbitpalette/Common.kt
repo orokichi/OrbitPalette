@@ -73,11 +73,11 @@ fun OrbitTheme(content: @Composable () -> Unit) {
 }
 
 enum class Tool(val label: String, val icon: ImageVector) {
-    SCREENSHOT("スクリーンショット", Icons.Rounded.Screenshot),
-    CANVAS("キャンバス", Icons.Rounded.Draw),
-    TOUCHVIEW("タッチビュー", Icons.Rounded.ZoomIn),
+    SCREENSHOT("ScreenShot", Icons.Rounded.Screenshot),
+    CANVAS("Note", Icons.Rounded.Draw),
+    TOUCHVIEW("TouchView", Icons.Rounded.ZoomIn),
     CALC("電卓", Icons.Rounded.Calculate),
-    NOTE("ライトノート", Icons.Rounded.EditNote);
+    NOTE("WriteNote", Icons.Rounded.EditNote);
 
     val angleDeg: Float get() = -90f + ordinal * 360f / entries.size
 }
@@ -86,7 +86,7 @@ object Notif {
     const val CH = "orbit"
     fun ensure(ctx: Context) {
         ctx.getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(NotificationChannel(CH, "Orbit Palette", NotificationManager.IMPORTANCE_LOW))
+            .createNotificationChannel(NotificationChannel(CH, "Android AirCommand", NotificationManager.IMPORTANCE_LOW))
     }
 }
 

@@ -98,7 +98,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
         Notif.ensure(this)
         val stop = PendingIntent.getService(this, 0, Intent(this, OverlayService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(this, Notif.CH)
-            .setSmallIcon(R.drawable.ic_stat).setContentTitle("Orbit Palette 表示中").setOngoing(true)
+            .setSmallIcon(R.drawable.ic_stat).setContentTitle("Android AirCommand 表示中").setOngoing(true)
             .addAction(0, "停止", stop).build()
         ServiceCompat.startForeground(this, 1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         showBubble()
@@ -182,11 +182,11 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     private fun openPalette() {
         if (paletteView != null) return
         val s = screen()
-        val r = dp(108f); val m = r + dp(56f)
+        val r = dp(90f); val m = r + dp(48f)
         val cx = bubbleParams.x + bubbleSize / 2f; val cy = bubbleParams.y + bubbleSize / 2f
         palette.center = Offset(cx.coerceIn(m, s.width() - m), cy.coerceIn(m, s.height() - m))
-        palette.radius = r; palette.inner = dp(38f); palette.highlighted = null
-        val p = overlayParams(s.width(), s.height(), LP.FLAG_NOT_FOCUSABLE).apply { x = 0; y = 0 }
+        palette.radius = r; palette.inner = dp(34f); palette.highlighted = null
+        val p = overlayParams(LP.MATCH_PARENT, LP.MATCH_PARENT, LP.FLAG_NOT_FOCUSABLE).apply { x = 0; y = 0 }
         val v = composeView { PaletteOverlay(palette) { onPaletteTouch(it) } }
         wm.addView(v, p); paletteView = v
     }
@@ -216,26 +216,74 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
         openWindow(Tool.NOTE)
     }
 
-    private fun project(mode: String) {
-        hideBubble()
+    private var captureCb: ((android.graphics.Bitmap?) -> Unit)? = null
+
+    /** One screenshot: accessibility (no prompt) when enabled, else MediaProjection. */
+    fun captureOnce(cb: (android.graphics.Bitmap?) -> Unit) {
         val a11y = OrbitA11yService.instance
-        if (mode == "shot" && a11y != null) {
-            main.postDelayed({
-                a11y.shoot { bmp ->
-                    if (bmp == null) { onCaptureFailed(); return@shoot }
-                    Thread {
-                        val f = java.io.File(cacheDir, "shot_${System.currentTimeMillis()}.png")
-                        f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-                        main.post { onShotDone(f.absolutePath) }
-                    }.start()
-                }
-            }, 300)
-            return
-        }
+        if (a11y != null) { main.postDelayed({ a11y.shoot(cb) }, 300); return }
+        captureCb = cb
         main.postDelayed({
-            startActivity(Intent(this, ProjectionActivity::class.java).putExtra("mode", mode)
+            startActivity(Intent(this, ProjectionActivity::class.java).putExtra("mode", "cb")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
         }, 120)
+    }
+
+    fun deliverCapture(b: android.graphics.Bitmap?) { val c = captureCb; captureCb = null; c?.invoke(b) }
+
+    private fun project(mode: String) {
+        hideBubble()
+        if (OrbitA11yService.instance == null) {
+            main.postDelayed({
+                startActivity(Intent(this, ProjectionActivity::class.java).putExtra("mode", mode)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
+            }, 120)
+            return
+        }
+        captureOnce { bmp ->
+            if (bmp == null) { showBubble(); return@captureOnce }
+            if (mode == "loupe") { FrameHub.setStatic(bmp); onLoupeStart(); return@captureOnce }
+            Thread {
+                val f = java.io.File(cacheDir, "shot_${System.currentTimeMillis()}.png")
+                f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                main.post { onShotDone(f.absolutePath) }
+            }.start()
+        }
+    }
+
+    // ---------- ScreenNote ----------
+    private var snoteView: View? = null
+
+    fun startScreenNote() {
+        val w = windows[Tool.CANVAS] ?: return
+        if (snoteView != null) return
+        if (!w.minimized) w.minimize()
+        w.setHidden(true); hideBubble()
+        captureOnce { bmp ->
+            w.setHidden(false)
+            if (bmp == null) { showBubble(); return@captureOnce }
+            val v = composeView {
+                ScreenNoteOverlay(bmp,
+                    onAdd = { crop -> endScreenNote(); canvasState.addImage(crop); windows[Tool.CANVAS]?.let { if (it.minimized) it.restore() } },
+                    onCancel = { endScreenNote(); windows[Tool.CANVAS]?.let { if (it.minimized) it.restore() } })
+            }
+            wm.addView(v, overlayParams(LP.MATCH_PARENT, LP.MATCH_PARENT, LP.FLAG_NOT_FOCUSABLE).apply { x = 0; y = 0 }); snoteView = v
+            w.bringToFront()
+        }
+    }
+
+    private fun endScreenNote() { snoteView?.let { runCatching { wm.removeView(it) } }; snoteView = null; showBubble() }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        main.postDelayed({
+            val s = screen()
+            if (bubble != null) {
+                bubbleParams.x = bubbleParams.x.coerceIn(0, s.width() - bubbleSize); bubbleParams.y = bubbleParams.y.coerceIn(0, s.height() - bubbleSize)
+                runCatching { wm.updateViewLayout(bubble, bubbleParams) }
+            }
+            windows.values.forEach { it.clamp() }
+        }, 200)
     }
 
     // ---------- Popup windows ----------
@@ -280,14 +328,14 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
         main.postDelayed({ if (thumbView === v) dismiss() }, 7000)
     }
 
-    fun onCaptureFailed() { showBubble() }
+    fun onCaptureFailed() { if (captureCb != null) deliverCapture(null) else showBubble() }
 
     // ---------- Touch view (loupe) ----------
     fun onLoupeStart() {
         if (loupeView != null) return
         val s = screen()
         val v = composeView { LoupeOverlay(onClose = { endLoupe() }) }
-        wm.addView(v, overlayParams(s.width(), s.height(), LP.FLAG_NOT_FOCUSABLE).apply { x = 0; y = 0 }); loupeView = v
+        wm.addView(v, overlayParams(LP.MATCH_PARENT, LP.MATCH_PARENT, LP.FLAG_NOT_FOCUSABLE).apply { x = 0; y = 0 }); loupeView = v
     }
 
     fun endLoupe() {
@@ -297,6 +345,6 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
 
     fun onLoupeEnded() {
         loupeView?.let { runCatching { wm.removeView(it) } }; loupeView = null
-        showBubble()
+        FrameHub.clear(); showBubble()
     }
 }

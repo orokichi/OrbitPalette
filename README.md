@@ -1,4 +1,4 @@
-# Orbit Palette
+# Android AirCommand
 
 Galaxy のポップアップウィンドウ / S プレビュー風の **フローティング円形ツールパレット**（Android / Kotlin / Jetpack Compose / Material 3 Expressive・ダイナミックカラー対応）。
 

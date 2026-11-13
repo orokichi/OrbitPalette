@@ -20,6 +20,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".LockNoteActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true"
+            android:excludeFromRecents="true" android:launchMode="singleTask" android:taskAffinity="com.orokichi.orbitpalette.locknote"
+            android:screenOrientation="fullUser" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
         <activity android:name=".EditorActivity" android:exported="false" android:taskAffinity="com.orokichi.orbitpalette.editor" />
         <activity android:name=".ProjectionActivity" android:exported="false"
             android:theme="@style/Theme.Orbit.Translucent" android:excludeFromRecents="true"
@@ -27,7 +30,7 @@
         <service android:name=".OverlayService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Floating tool palette overlay" />
         </service>
-        <service android:name=".OrbitA11yService" android:exported="true" android:label="Orbit Palette スクリーンショット"
+        <service android:name=".OrbitA11yService" android:exported="true" android:label="Android AirCommand"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/a11y" />

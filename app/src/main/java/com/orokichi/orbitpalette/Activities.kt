@@ -82,7 +82,7 @@ fun Home() {
     }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notif = it }
 
-    Scaffold(topBar = { LargeTopAppBar(title = { Text("Orbit Palette", fontWeight = FontWeight.Bold) }) }) { pad ->
+    Scaffold(topBar = { LargeTopAppBar(title = { Text("Android AirCommand", fontWeight = FontWeight.Bold) }) }) { pad ->
         Column(
             Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -100,8 +100,8 @@ fun Home() {
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)))
             }
             PermissionCard(
-                "スクリーンショットを許可なしで撮影",
-                "ユーザー補助で「Orbit Palette スクリーンショット」をオンにすると、毎回の確認なしで撮影できます。オンにできない場合は「アプリ情報」右上の︙から「制限付き設定を許可」してください",
+                "ユーザー補助（推奨）",
+                "ユーザー補助で「Android AirCommand」をオンにすると、ScreenShot・TouchView・ScreenNote が毎回の確認なしで使え、ロック画面のダブルタップで Note が開きます。オンにできない場合は「アプリ情報」右上の︙から「制限付き設定を許可」してください",
                 a11y, extra = "アプリ情報" to {
                     ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)))
                 }
@@ -167,7 +167,7 @@ sealed interface Mark
 class PenMark(val pts: List<Offset>, val color: Int, val width: Float, val alpha: Float) : Mark
 data class TextMark(val text: String, val pos: Offset, val color: Int, val size: Float) : Mark
 
-enum class EditTool { PEN, MARKER, TEXT }
+enum class EditTool { PEN, MARKER, ERASER, TEXT }
 
 private fun textPaint(m: TextMark) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = m.color; textSize = m.size; typeface = Typeface.DEFAULT_BOLD
@@ -176,7 +176,9 @@ private fun textPaint(m: TextMark) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
 
 private fun drawMark(c: android.graphics.Canvas, m: Mark) {
     when (m) {
-        is PenMark -> c.drawPath(smoothPath(m.pts), strokePaint(m.color, m.width, m.alpha))
+        is PenMark -> c.drawPath(smoothPath(m.pts), strokePaint(m.color, m.width, if (m.alpha < 0f) 1f else m.alpha).apply {
+            if (m.alpha < 0f) xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+        })
         is TextMark -> c.drawText(m.text, m.pos.x, m.pos.y, textPaint(m))
     }
 }
@@ -213,16 +215,25 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
     var color by remember { mutableIntStateOf(editColors[0]) }
     var dialog by remember { mutableStateOf<Pair<Offset, Int>?>(null) } // position, index (-1 = new)
     var saving by remember { mutableStateOf(false) }
-    var sizeK by remember { mutableFloatStateOf(1f) }
-    val penW = bmp.width * 0.008f * sizeK; val markerW = bmp.width * 0.04f * sizeK; val textSize = bmp.width * 0.055f * sizeK
+    val sizes = remember { mutableStateMapOf<EditTool, Float>() }
+    val sizeK = sizes[tool] ?: 1f
+    val penW = bmp.width * 0.008f * (sizes[EditTool.PEN] ?: 1f); val markerW = bmp.width * 0.04f * (sizes[EditTool.MARKER] ?: 1f)
+    val eraserW = bmp.width * 0.04f * (sizes[EditTool.ERASER] ?: 1f); val textSize = bmp.width * 0.055f * (sizes[EditTool.TEXT] ?: 1f)
+    fun liveMark(pts: List<Offset>) = when (tool) {
+        EditTool.MARKER -> PenMark(pts, color, markerW, 0.4f)
+        EditTool.ERASER -> PenMark(pts, 0xFF000000.toInt(), eraserW, -1f)
+        else -> PenMark(pts, color, penW, 1f)
+    }
 
     fun save() {
         saving = true
         scope.launch {
             val ok = withContext(Dispatchers.IO) {
                 val out = bmp.copy(Bitmap.Config.ARGB_8888, true)
-                val c = android.graphics.Canvas(out)
-                marks.toList().forEach { drawMark(c, it) }
+                val layer = Bitmap.createBitmap(out.width, out.height, Bitmap.Config.ARGB_8888)
+                val lc = android.graphics.Canvas(layer)
+                marks.toList().forEach { drawMark(lc, it) }
+                android.graphics.Canvas(out).drawBitmap(layer, 0f, 0f, null)
                 Gallery.save(ctx, out, "Screenshot")
             }
             Toast.makeText(ctx, if (ok) "保存しました" else "保存に失敗しました", Toast.LENGTH_SHORT).show()
@@ -251,16 +262,18 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
                 Surface(shape = CircleShape, color = cs.surfaceContainerHigh, shadowElevation = 4.dp, modifier = Modifier.widthIn(max = 420.dp)) {
                     Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(if (tool == EditTool.TEXT) "文字" else "太さ", style = MaterialTheme.typography.labelLarge)
-                        Slider(value = sizeK, onValueChange = { sizeK = it }, valueRange = 0.3f..4f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
-                        val dot = with(LocalDensity.current) { ((if (tool == EditTool.MARKER) 10f else 4f) * sizeK).dp }
+                        Slider(value = sizeK, onValueChange = { sizes[tool] = it }, valueRange = 0.3f..4f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                        val dot = ((if (tool == EditTool.MARKER || tool == EditTool.ERASER) 10f else 4f) * sizeK).dp
                         Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
-                            Box(Modifier.size(dot.coerceIn(3.dp, 30.dp)).background(Color(color).copy(alpha = if (tool == EditTool.MARKER) 0.4f else 1f), CircleShape))
+                            Box(Modifier.size(dot.coerceIn(3.dp, 30.dp)).then(
+                                if (tool == EditTool.ERASER) Modifier.border(2.dp, cs.onSurface, CircleShape)
+                                else Modifier.background(Color(color).copy(alpha = if (tool == EditTool.MARKER) 0.4f else 1f), CircleShape)))
                         }
                     }
                 }
                 Surface(shape = CircleShape, color = cs.surfaceContainerHigh, shadowElevation = 6.dp) {
                     Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        listOf(EditTool.PEN to Icons.Rounded.Brush, EditTool.MARKER to Icons.Rounded.BorderColor, EditTool.TEXT to Icons.Rounded.TextFields).forEach { (t, ic) ->
+                        listOf(EditTool.PEN to Icons.Rounded.Brush, EditTool.MARKER to Icons.Rounded.BorderColor, EditTool.ERASER to Icons.Rounded.AutoFixNormal, EditTool.TEXT to Icons.Rounded.TextFields).forEach { (t, ic) ->
                             val sel = tool == t
                             val corner by animateDpAsState(if (sel) 14.dp else 24.dp, spring(0.5f, 500f), label = "t")
                             Surface(onClick = { tool = t }, shape = RoundedCornerShape(corner),
@@ -289,7 +302,7 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
             val dw = bmp.width * scale; val dh = bmp.height * scale
             Box(
                 Modifier.size(with(density) { dw.toDp() }, with(density) { dh.toDp() })
-                    .pointerInput(tool, color) {
+                    .pointerInput(tool, color, penW, markerW, eraserW) {
                         if (tool == EditTool.TEXT) detectTapGestures { p ->
                             val ip = p / scale
                             val idx = marks.indexOfLast { it is TextMark && hitText(it, ip) }
@@ -298,7 +311,7 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
                             onDragStart = { live.clear(); live.add(it / scale) },
                             onDrag = { c, _ -> live.add(c.position / scale) },
                             onDragEnd = {
-                                marks.add(if (tool == EditTool.PEN) PenMark(live.toList(), color, penW, 1f) else PenMark(live.toList(), color, markerW, 0.4f))
+                                marks.add(liveMark(live.toList()))
                                 redo.clear(); live.clear()
                             }
                         )
@@ -317,9 +330,9 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
                         drawImage(img, dstSize = IntSize(dw.toInt(), dh.toInt()))
                         drawIntoCanvas { cv ->
                             val n = cv.nativeCanvas
-                            n.save(); n.scale(scale, scale)
+                            n.saveLayer(null, null); n.scale(scale, scale)
                             marks.forEach { drawMark(n, it) }
-                            if (live.isNotEmpty()) drawMark(n, PenMark(live.toList(), color, if (tool == EditTool.PEN) penW else markerW, if (tool == EditTool.PEN) 1f else 0.4f))
+                            if (live.isNotEmpty()) drawMark(n, liveMark(live.toList()))
                             n.restore()
                         }
                     }
@@ -348,5 +361,23 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
                 else TextButton(onClick = { dialog = null }) { Text("キャンセル") }
             }
         )
+    }
+}
+
+
+/** Full-screen Note shown over the lock screen (double-tap on the lock screen). */
+class LockNoteActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setShowWhenLocked(true); setTurnScreenOn(true)
+        enableEdgeToEdge()
+        val st = CanvasState(this, "locknote", smart = false)
+        setContent {
+            OrbitTheme {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                    Box(Modifier.fillMaxSize().systemBarsPadding()) { CanvasTool(st, full = true) { finish() } }
+                }
+            }
+        }
     }
 }

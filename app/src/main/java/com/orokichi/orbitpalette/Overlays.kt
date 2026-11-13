@@ -49,6 +49,11 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.unit.dp
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -88,7 +93,7 @@ fun PaletteOverlay(st: PaletteState, onTouch: (MotionEvent) -> Unit) {
     Box(Modifier.fillMaxSize().pointerInteropFilter { onTouch(it); true }.drawBehind {
         val p = prog.value
         drawRect(Color.Black.copy(alpha = 0.22f * p.coerceIn(0f, 1f)))
-        val outer = (st.radius + 46.dp.toPx()) * p
+        val outer = (st.radius + 40.dp.toPx()) * p
         drawCircle(cs.surfaceContainerHigh, outer, st.center)
         drawCircle(cs.outlineVariant, outer, st.center, style = Stroke(1.dp.toPx()))
         if (st.highlighted != null) drawArc(
@@ -104,21 +109,21 @@ fun PaletteOverlay(st: PaletteState, onTouch: (MotionEvent) -> Unit) {
             val fg by animateColorAsState(if (hl) cs.onPrimary else cs.onSecondaryContainer, label = "f")
             val a = Math.toRadians(t.angleDeg.toDouble())
             val r = st.radius * prog.value
-            val half = with(density) { 28.dp.toPx() }
+            val half = with(density) { 24.dp.toPx() }
             val x = st.center.x + (cos(a) * r).toFloat() - half
             val y = st.center.y + (sin(a) * r).toFloat() - half
             Box(
-                Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.size(56.dp)
+                Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.size(48.dp)
                     .graphicsLayer { scaleX = scale * prog.value.coerceAtMost(1.1f); scaleY = scaleX }
                     .background(bg, RoundedCornerShape(corner)),
                 contentAlignment = Alignment.Center
             ) { Icon(t.icon, t.label, tint = fg) }
         }
-        val hub = with(density) { 46.dp.toPx() }
+        val hub = with(density) { 40.dp.toPx() }
         Surface(
             shape = CircleShape, color = cs.surfaceContainerHighest, shadowElevation = 2.dp,
             modifier = Modifier.offset { IntOffset((st.center.x - hub).roundToInt(), (st.center.y - hub).roundToInt()) }
-                .size(92.dp).graphicsLayer { scaleX = prog.value; scaleY = prog.value }
+                .size(80.dp).graphicsLayer { scaleX = prog.value; scaleY = prog.value }
         ) {
             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(8.dp)) {
                 val h = st.highlighted
@@ -186,7 +191,7 @@ fun LoupeOverlay(onClose: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp)) {
                 IconButton(onClick = { zoom = (zoom - 0.5f).coerceAtLeast(1.5f) }) { Icon(Icons.Rounded.ZoomOut, "縮小") }
-                Text("タッチビュー  ${"%.1f".format(zoom)}x", style = MaterialTheme.typography.labelLarge)
+                Text("TouchView  ${"%.1f".format(zoom)}x", style = MaterialTheme.typography.labelLarge)
                 IconButton(onClick = { zoom = (zoom + 0.5f).coerceAtMost(6f) }) { Icon(Icons.Rounded.ZoomIn, "拡大") }
                 FilledIconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "終了") }
             }
@@ -279,6 +284,21 @@ class FloatingWindow(
     fun restore() { minimized = false; load(beforeMin); update() }
 
     fun close() { runCatching { wm.removeView(root) }; svc.onWindowClosed(tool) }
+
+    fun setHidden(h: Boolean) { root.visibility = if (h) android.view.View.INVISIBLE else android.view.View.VISIBLE }
+
+    fun bringToFront() { runCatching { wm.removeView(root); wm.addView(root, params) } }
+
+    fun clamp() {
+        val s = svc.screen()
+        if (maximized) { params.x = px(8); params.y = px(40); params.width = s.width() - px(16); params.height = s.height() - px(120) }
+        else {
+            params.width = params.width.coerceAtMost(s.width()); params.height = params.height.coerceAtMost(s.height() - px(40))
+            params.x = params.x.coerceIn(0, (s.width() - params.width).coerceAtLeast(0))
+            params.y = params.y.coerceIn(0, (s.height() - params.height).coerceAtLeast(0))
+        }
+        update()
+    }
 }
 
 @Composable
@@ -326,6 +346,85 @@ fun WindowChrome(w: FloatingWindow) {
                     drawLine(c, Offset(s * 0.6f, s * 0.8f), Offset(s * 0.8f, s * 0.6f), 2.dp.toPx())
                 }
             }
+        }
+    }
+}
+
+
+// ================= ScreenNote: circle an area, adjust the box, add it to Note =================
+@Composable
+fun ScreenNoteOverlay(bmp: Bitmap, onAdd: (Bitmap) -> Unit, onCancel: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val img = remember { bmp.asImageBitmap() }
+    val lasso = remember { mutableStateListOf<Offset>() }
+    var sel by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var vs by remember { mutableStateOf(IntSize.Zero) }
+    fun norm(r: androidx.compose.ui.geometry.Rect) = androidx.compose.ui.geometry.Rect(
+        minOf(r.left, r.right).coerceIn(0f, vs.width.toFloat()), minOf(r.top, r.bottom).coerceIn(0f, vs.height.toFloat()),
+        maxOf(r.left, r.right).coerceIn(0f, vs.width.toFloat()), maxOf(r.top, r.bottom).coerceIn(0f, vs.height.toFloat()))
+    Box(Modifier.fillMaxSize().onSizeChanged { vs = it }.pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(); down.consume()
+            val hr = 32.dp.toPx()
+            val s0 = sel
+            val mode = if (s0 == null) -1 else {
+                val k = listOf(s0.topLeft, s0.topRight, s0.bottomLeft, s0.bottomRight).indexOfFirst { (it - down.position).getDistance() < hr }
+                if (k >= 0) k else if (s0.contains(down.position)) 4 else -1
+            }
+            if (mode == -1) { sel = null; lasso.clear(); lasso.add(down.position) }
+            var last = down.position
+            while (true) {
+                val ev = awaitPointerEvent()
+                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                if (!c.pressed) break
+                val p = c.position; val d = p - last; last = p; c.consume()
+                val r = sel
+                when {
+                    mode == -1 -> lasso.add(p)
+                    r == null -> {}
+                    mode == 4 -> sel = r.translate(d)
+                    mode == 0 -> sel = r.copy(left = p.x, top = p.y)
+                    mode == 1 -> sel = r.copy(right = p.x, top = p.y)
+                    mode == 2 -> sel = r.copy(left = p.x, bottom = p.y)
+                    mode == 3 -> sel = r.copy(right = p.x, bottom = p.y)
+                }
+            }
+            if (mode == -1 && lasso.size > 4) {
+                sel = androidx.compose.ui.geometry.Rect(lasso.minOf { it.x }, lasso.minOf { it.y }, lasso.maxOf { it.x }, lasso.maxOf { it.y })
+                lasso.clear()
+            }
+            sel = sel?.let { norm(it) }?.takeIf { it.width > 24.dp.toPx() && it.height > 24.dp.toPx() }
+        }
+    }.drawBehind {
+        val sx = bmp.width / size.width; val sy = bmp.height / size.height
+        drawImage(img, dstSize = IntSize(size.width.toInt(), size.height.toInt()))
+        drawRect(Color.Black.copy(alpha = 0.4f))
+        sel?.let { r ->
+            drawImage(img, srcOffset = IntOffset((r.left * sx).toInt(), (r.top * sy).toInt()),
+                srcSize = IntSize((r.width * sx).toInt().coerceAtLeast(1), (r.height * sy).toInt().coerceAtLeast(1)),
+                dstOffset = IntOffset(r.left.toInt(), r.top.toInt()), dstSize = IntSize(r.width.toInt(), r.height.toInt()))
+            drawRect(cs.primary, r.topLeft, r.size, style = Stroke(3.dp.toPx()))
+            listOf(r.topLeft, r.topRight, r.bottomLeft, r.bottomRight).forEach {
+                drawCircle(cs.primary, 10.dp.toPx(), it); drawCircle(Color.White, 5.dp.toPx(), it)
+            }
+        }
+        if (lasso.size > 1) drawIntoCanvas { it.nativeCanvas.drawPath(smoothPath(lasso.toList()), strokePaint(cs.primary.toArgb(), 4.dp.toPx())) }
+    }) {
+        Text(
+            if (sel == null) "指やペンで◯を描いて範囲を選択" else "角をドラッグで調整・中をドラッグで移動",
+            color = Color.White, style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 16.dp)
+                .background(Color.Black.copy(alpha = 0.55f), CircleShape).padding(horizontal = 18.dp, vertical = 8.dp)
+        )
+        Row(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilledTonalButton(onClick = onCancel) { Text("キャンセル") }
+            Button(enabled = sel != null, onClick = {
+                val r = sel ?: return@Button
+                val sx = bmp.width / vs.width.toFloat(); val sy = bmp.height / vs.height.toFloat()
+                val l = (r.left * sx).toInt().coerceIn(0, bmp.width - 1); val t = (r.top * sy).toInt().coerceIn(0, bmp.height - 1)
+                val w = (r.width * sx).toInt().coerceIn(1, bmp.width - l); val h = (r.height * sy).toInt().coerceIn(1, bmp.height - t)
+                onAdd(Bitmap.createBitmap(bmp, l, t, w, h))
+            }) { Icon(Icons.Rounded.Add, null); Spacer(Modifier.width(6.dp)); Text("追加") }
         }
     }
 }
