@@ -89,7 +89,7 @@ fun Home() {
             Card(shape = RoundedCornerShape(32.dp), colors = CardDefaults.cardColors(containerColor = cs.primaryContainer)) {
                 Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(56.dp).background(cs.primary, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Hub, null, tint = cs.onPrimary)
+                        Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_pen), null, tint = cs.onPrimary, modifier = Modifier.size(32.dp))
                     }
                     Spacer(Modifier.width(16.dp))
                     Text("どのアプリの上でも、丸いボタンからツールを呼び出せます。", style = MaterialTheme.typography.bodyLarge, color = cs.onPrimaryContainer)

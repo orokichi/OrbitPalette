@@ -6,6 +6,9 @@ import android.graphics.RectF
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.widget.FrameLayout
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import androidx.compose.ui.res.painterResource
 import android.view.WindowManager.LayoutParams as LP
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -58,7 +61,7 @@ fun Bubble(onTouch: (MotionEvent) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Box(Modifier.fillMaxSize().padding(4.dp).pointerInteropFilter { onTouch(it); true }) {
         Surface(shape = CircleShape, color = cs.primary, contentColor = cs.onPrimary, shadowElevation = 6.dp, modifier = Modifier.fillMaxSize()) {
-            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Hub, null, Modifier.size(28.dp)) }
+            Box(contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.ic_pen), null, Modifier.size(30.dp)) }
         }
     }
 }
@@ -222,6 +225,8 @@ class FloatingWindow(
     }
 
     fun show() {
+        root.setViewTreeLifecycleOwner(svc)
+        root.setViewTreeSavedStateRegistryOwner(svc)
         root.addView(svc.composeView { WindowChrome(this) })
         wm.addView(root, params)
     }
