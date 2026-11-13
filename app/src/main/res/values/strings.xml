@@ -1,1 +1,4 @@
-<resources><string name="app_name">Orbit Palette</string></resources>
+<resources>
+    <string name="app_name">Orbit Palette</string>
+    <string name="a11y_desc">Orbit Palette のスクリーンショットを、毎回の許可なしで撮影するために使います。画面の内容を読み取ったり送信したりはしません。</string>
+</resources>

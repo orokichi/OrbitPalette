@@ -119,7 +119,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     // ---------- Bubble ----------
-    private val bubbleSize get() = dp(60f).toInt()
+    private val bubbleSize get() = dp(48f).toInt()
 
     fun showBubble() {
         if (bubble != null) return
@@ -210,8 +210,28 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
         }
     }
 
+    fun openNoteWith(t: String) {
+        NoteStore.init(this)
+        NoteStore.set(if (NoteStore.text.isBlank()) t else NoteStore.text.trimEnd() + "\n" + t)
+        openWindow(Tool.NOTE)
+    }
+
     private fun project(mode: String) {
         hideBubble()
+        val a11y = OrbitA11yService.instance
+        if (mode == "shot" && a11y != null) {
+            main.postDelayed({
+                a11y.shoot { bmp ->
+                    if (bmp == null) { onCaptureFailed(); return@shoot }
+                    Thread {
+                        val f = java.io.File(cacheDir, "shot_${System.currentTimeMillis()}.png")
+                        f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                        main.post { onShotDone(f.absolutePath) }
+                    }.start()
+                }
+            }, 300)
+            return
+        }
         main.postDelayed({
             startActivity(Intent(this, ProjectionActivity::class.java).putExtra("mode", mode)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))

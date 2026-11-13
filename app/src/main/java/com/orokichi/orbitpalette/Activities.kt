@@ -75,8 +75,9 @@ fun Home() {
     fun notifOk() = Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     var notif by remember { mutableStateOf(notifOk()) }
+    var a11y by remember { mutableStateOf(OrbitA11yService.enabled(ctx)) }
     LifecycleResumeEffect(Unit) {
-        overlay = Settings.canDrawOverlays(ctx); running = OverlayService.instance != null; notif = notifOk()
+        overlay = Settings.canDrawOverlays(ctx); running = OverlayService.instance != null; notif = notifOk(); a11y = OrbitA11yService.enabled(ctx)
         onPauseOrDispose { }
     }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notif = it }
@@ -98,6 +99,13 @@ fun Home() {
             PermissionCard("他のアプリの上に表示", "フローティングボタンとポップアップウィンドウの表示に必要です", overlay) {
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)))
             }
+            PermissionCard(
+                "スクリーンショットを許可なしで撮影",
+                "ユーザー補助で「Orbit Palette スクリーンショット」をオンにすると、毎回の確認なしで撮影できます。オンにできない場合は「アプリ情報」右上の︙から「制限付き設定を許可」してください",
+                a11y, extra = "アプリ情報" to {
+                    ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)))
+                }
+            ) { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
             if (Build.VERSION.SDK_INT >= 33) PermissionCard("通知", "常駐中であることを通知に表示します", notif) {
                 notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
@@ -136,7 +144,7 @@ fun Home() {
 }
 
 @Composable
-private fun PermissionCard(title: String, desc: String, granted: Boolean, onGrant: () -> Unit) {
+private fun PermissionCard(title: String, desc: String, granted: Boolean, extra: Pair<String, () -> Unit>? = null, onGrant: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
         Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -146,7 +154,10 @@ private fun PermissionCard(title: String, desc: String, granted: Boolean, onGran
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(desc, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
-            if (!granted) FilledTonalButton(onClick = onGrant) { Text("許可") }
+            if (!granted) Column(horizontalAlignment = Alignment.End) {
+                FilledTonalButton(onClick = onGrant) { Text(if (extra != null) "オンにする" else "許可") }
+                extra?.let { (label, act) -> TextButton(onClick = act) { Text(label) } }
+            }
         }
     }
 }
@@ -202,7 +213,8 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
     var color by remember { mutableIntStateOf(editColors[0]) }
     var dialog by remember { mutableStateOf<Pair<Offset, Int>?>(null) } // position, index (-1 = new)
     var saving by remember { mutableStateOf(false) }
-    val penW = bmp.width * 0.008f; val markerW = bmp.width * 0.04f; val textSize = bmp.width * 0.055f
+    var sizeK by remember { mutableFloatStateOf(1f) }
+    val penW = bmp.width * 0.008f * sizeK; val markerW = bmp.width * 0.04f * sizeK; val textSize = bmp.width * 0.055f * sizeK
 
     fun save() {
         saving = true
@@ -235,7 +247,17 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
             )
         },
         bottomBar = {
-            Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp), contentAlignment = Alignment.Center) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(shape = CircleShape, color = cs.surfaceContainerHigh, shadowElevation = 4.dp, modifier = Modifier.widthIn(max = 420.dp)) {
+                    Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (tool == EditTool.TEXT) "文字" else "太さ", style = MaterialTheme.typography.labelLarge)
+                        Slider(value = sizeK, onValueChange = { sizeK = it }, valueRange = 0.3f..4f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                        val dot = with(LocalDensity.current) { ((if (tool == EditTool.MARKER) 10f else 4f) * sizeK).dp }
+                        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(dot.coerceIn(3.dp, 30.dp)).background(Color(color).copy(alpha = if (tool == EditTool.MARKER) 0.4f else 1f), CircleShape))
+                        }
+                    }
+                }
                 Surface(shape = CircleShape, color = cs.surfaceContainerHigh, shadowElevation = 6.dp) {
                     Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         listOf(EditTool.PEN to Icons.Rounded.Brush, EditTool.MARKER to Icons.Rounded.BorderColor, EditTool.TEXT to Icons.Rounded.TextFields).forEach { (t, ic) ->

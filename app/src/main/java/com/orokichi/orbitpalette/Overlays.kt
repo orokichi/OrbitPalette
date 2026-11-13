@@ -59,9 +59,9 @@ import kotlin.math.sin
 @Composable
 fun Bubble(onTouch: (MotionEvent) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxSize().padding(4.dp).pointerInteropFilter { onTouch(it); true }) {
+    Box(Modifier.fillMaxSize().padding(3.dp).pointerInteropFilter { onTouch(it); true }) {
         Surface(shape = CircleShape, color = cs.primary, contentColor = cs.onPrimary, shadowElevation = 6.dp, modifier = Modifier.fillMaxSize()) {
-            Box(contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.ic_pen), null, Modifier.size(30.dp)) }
+            Box(contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.ic_pen), null, Modifier.size(24.dp)) }
         }
     }
 }

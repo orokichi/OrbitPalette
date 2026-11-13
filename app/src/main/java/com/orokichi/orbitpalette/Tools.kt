@@ -63,6 +63,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlinx.coroutines.tasks.await
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.roundToInt
 import java.math.BigDecimal
 import java.math.MathContext
 
@@ -95,16 +101,38 @@ object InkRecognizer {
         }
     }
 
-    fun recognize(strokes: List<InkStroke>, cb: (String) -> Unit) {
-        val r = recognizer ?: return
-        if (!ready) return
-        val ink = Ink.builder()
-        strokes.forEach { s ->
-            val sb = Ink.Stroke.builder()
-            s.pts.forEachIndexed { i, p -> sb.addPoint(Ink.Point.create(p.x, p.y, s.times[i])) }
-            ink.addStroke(sb.build())
+    /** Recognize regardless of writing direction: try several rotations and keep the most confident result. */
+    suspend fun recognize(strokes: List<InkStroke>): String {
+        val r = recognizer ?: return ""
+        if (!ready || strokes.isEmpty()) return ""
+        val all = strokes.flatMap { it.pts }
+        val mx = all.sumOf { it.x.toDouble() } / all.size
+        val my = all.sumOf { it.y.toDouble() } / all.size
+        var sxx = 0.0; var syy = 0.0; var sxy = 0.0
+        all.forEach { val dx = it.x - mx; val dy = it.y - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy }
+        val axis = 0.5 * atan2(2 * sxy, sxx - syy)
+        val angles = listOf(0.0, -axis, PI - axis, PI / 2, -PI / 2, PI)
+            .distinctBy { (((it % (2 * PI)) + 2 * PI) % (2 * PI) * 20).roundToInt() }
+        val results = angles.mapNotNull { a ->
+            val c = cos(a); val sn = sin(a)
+            val ink = Ink.builder()
+            strokes.forEach { s ->
+                val sb = Ink.Stroke.builder()
+                s.pts.forEachIndexed { i, p ->
+                    val dx = p.x - mx; val dy = p.y - my
+                    sb.addPoint(Ink.Point.create((c * dx - sn * dy + mx).toFloat(), (sn * dx + c * dy + my).toFloat(), s.times[i]))
+                }
+                ink.addStroke(sb.build())
+            }
+            runCatching { r.recognize(ink.build()).await() }.getOrNull()?.candidates?.firstOrNull()?.takeIf { it.text.isNotBlank() }
         }
-        r.recognize(ink.build()).addOnSuccessListener { res -> cb(res.candidates.firstOrNull()?.text ?: "") }
+        if (results.isEmpty()) return ""
+        val scored = results.filter { it.score != null }
+        val best = when {
+            scored.isNotEmpty() -> scored.minBy { it.score!! }
+            else -> results.firstOrNull { LinkDetector.detect(it.text).isNotEmpty() } ?: results.first()
+        }
+        return best.text
     }
 }
 
@@ -121,15 +149,23 @@ class CanvasState(ctx: Context) {
 
     fun commit(s: InkStroke) { strokes.add(s); pending.add(s); save() }
 
-    fun recognizePending() {
+    suspend fun recognizePending() {
         if (pending.isEmpty()) return
         val g = pending.toList(); pending.clear()
-        InkRecognizer.recognize(g) { text ->
+        InkRecognizer.recognize(g).let { text ->
+            if (text.isBlank()) return
             val links = LinkDetector.detect(text)
             var b = g[0].bounds()
             g.drop(1).forEach { val o = it.bounds(); b = Rect(minOf(b.left, o.left), minOf(b.top, o.top), maxOf(b.right, o.right), maxOf(b.bottom, o.bottom)) }
             groups.add(InkGroup(g, b, text, links))
         }
+    }
+
+    /** All handwriting as text, top-to-bottom. */
+    suspend fun convertAll(): String {
+        recognizePending()
+        val t = groups.sortedWith(compareBy({ it.bounds.top }, { it.bounds.left })).joinToString("\n") { it.text }.trim()
+        return t.ifBlank { InkRecognizer.recognize(strokes.toList()) }
     }
 
     fun undo() {
@@ -220,6 +256,25 @@ fun CanvasTool(st: CanvasState) {
                     }
                 }
         ) {
+            var converting by remember { mutableStateOf(false) }
+            if (st.strokes.isNotEmpty()) SmallFloatingActionButton(
+                onClick = {
+                    if (!InkRecognizer.ready) Toast.makeText(ctx, "文字認識モデルを準備中です", Toast.LENGTH_SHORT).show()
+                    else if (!converting) scope.launch {
+                        converting = true
+                        job[0]?.cancel()
+                        val t = st.convertAll()
+                        converting = false
+                        if (t.isBlank()) Toast.makeText(ctx, "文字を認識できませんでした", Toast.LENGTH_SHORT).show()
+                        else OverlayService.instance?.openNoteWith(t)
+                    }
+                },
+                containerColor = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer,
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+            ) {
+                if (converting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Rounded.TextFields, "テキストに変換")
+            }
             if (st.strokes.isEmpty()) Text(
                 if (InkRecognizer.ready) "指で自由に手書きメモ" else "指で自由に手書きメモ\n（文字認識モデルを準備中…）",
                 color = cs.onSurfaceVariant.copy(alpha = 0.6f), textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center)
@@ -352,18 +407,30 @@ fun CalculatorTool() {
 }
 
 // ===================== Light note =====================
+object NoteStore {
+    private var prefs: android.content.SharedPreferences? = null
+    var text by mutableStateOf("")
+        private set
+    fun init(ctx: Context) {
+        if (prefs != null) return
+        prefs = ctx.getSharedPreferences("note", Context.MODE_PRIVATE)
+        text = prefs?.getString("t", "") ?: ""
+    }
+    fun set(v: String) { text = v; prefs?.edit()?.putString("t", v)?.apply() }
+}
+
 @Composable
 fun NoteTool() {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
-    val prefs = remember { ctx.getSharedPreferences("note", Context.MODE_PRIVATE) }
-    var text by remember { mutableStateOf(prefs.getString("t", "") ?: "") }
+    remember { NoteStore.init(ctx) }
+    val text = NoteStore.text
     var editing by remember { mutableStateOf(text.isBlank()) }
     Box(Modifier.fillMaxSize()) {
         if (editing) {
             val fr = remember { FocusRequester() }
             BasicTextField(
-                value = text, onValueChange = { text = it; prefs.edit().putString("t", it).apply() },
+                value = text, onValueChange = { NoteStore.set(it) },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = cs.onSurface),
                 cursorBrush = SolidColor(cs.primary),
                 modifier = Modifier.fillMaxSize().padding(16.dp).focusRequester(fr)
