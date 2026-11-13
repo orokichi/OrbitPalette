@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.Orbit" parent="android:Theme.Material.NoActionBar" />
+</resources>

@@ -1,0 +1,7 @@
+<resources>
+    <color name="ic_bg">#FFD8E2FF</color>
+    <style name="Theme.Orbit" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Orbit.Translucent" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>
