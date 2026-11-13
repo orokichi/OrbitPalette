@@ -77,7 +77,13 @@ fun PaletteOverlay(st: PaletteState, onTouch: (MotionEvent) -> Unit) {
     LaunchedEffect(Unit) { prog.animateTo(1f, spring(dampingRatio = 0.62f, stiffness = 380f)) }
     LaunchedEffect(st.highlighted) { if (st.highlighted != null) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
     val sweep = 360f / Tool.entries.size
-    val hlAngle by animateFloatAsState((st.highlighted?.angleDeg ?: 0f), spring(0.7f, Spring.StiffnessMedium), label = "a")
+    // Unwrapped target: always rotate the shortest way, so spinning past the seam never jumps.
+    val target = remember { floatArrayOf(Float.NaN) }
+    st.highlighted?.let { h ->
+        val prev = target[0]
+        target[0] = if (prev.isNaN()) h.angleDeg else prev + (((h.angleDeg - prev) % 360f + 540f) % 360f - 180f)
+    }
+    val hlAngle by animateFloatAsState(if (target[0].isNaN()) 0f else target[0], spring(0.7f, Spring.StiffnessMedium), label = "a")
 
     Box(Modifier.fillMaxSize().pointerInteropFilter { onTouch(it); true }.drawBehind {
         val p = prog.value
