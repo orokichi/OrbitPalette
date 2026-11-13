@@ -138,7 +138,7 @@ object InkRecognizer {
     }
 }
 
-class CanvasImage(val bmp: Bitmap, val rect: Rect, val file: String) { val ib = bmp.asImageBitmap() }
+class CanvasImage(val bmp: Bitmap, var rect: Rect, val file: String) { val ib = bmp.asImageBitmap() }
 
 class CanvasState(private val ctx: Context, private val name: String = "canvas", val smart: Boolean = true) {
     val strokes = mutableStateListOf<InkStroke>()
@@ -148,6 +148,8 @@ class CanvasState(private val ctx: Context, private val name: String = "canvas",
     private val ops = ArrayList<Any>()
     var color by mutableIntStateOf(0) // 0 = theme ink
     var erasing by mutableStateOf(false)
+    var moving by mutableStateOf(false)
+    var selected by mutableStateOf<CanvasImage?>(null)
     var penDp by mutableFloatStateOf(3f)
     var eraserDp by mutableFloatStateOf(16f)
     var tick by mutableIntStateOf(0)
@@ -197,6 +199,19 @@ class CanvasState(private val ctx: Context, private val name: String = "canvas",
     }
 
     fun eraseDone() = save()
+
+    fun hitImage(p: Offset) = images.lastOrNull { it.rect.contains(p) }
+
+    /** Strokes drawn on top of an image move with it. */
+    fun attachedTo(im: CanvasImage) = strokes.filter { s -> s.pts.all { im.rect.inflate(4f).contains(it) } }
+
+    fun moveImage(im: CanvasImage, attached: List<InkStroke>, d: Offset) {
+        im.rect = im.rect.translate(d)
+        attached.forEach { s -> for (i in s.pts.indices) s.pts[i] = s.pts[i] + d }
+        tick++
+    }
+
+    fun moveDone() { if (smart) groups.clear(); save(); saveImages() }
 
     suspend fun recognizePending() {
         if (!smart || pending.isEmpty()) return
@@ -295,6 +310,22 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
                     awaitEachGesture {
                         val down = awaitFirstDown(); down.consume()
                         job[0]?.cancel()
+                        if (st.moving) {
+                            val im = st.hitImage(down.position)
+                            st.selected = im
+                            if (im == null) return@awaitEachGesture
+                            st.images.remove(im); st.images.add(im)
+                            val att = st.attachedTo(im)
+                            var last = down.position
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!c.pressed) break
+                                st.moveImage(im, att, c.position - last); last = c.position; c.consume()
+                            }
+                            st.moveDone()
+                            return@awaitEachGesture
+                        }
                         if (st.erasing) {
                             val r = with(density) { st.eraserDp.dp.toPx() }
                             eraserPos = down.position; st.eraseAt(down.position, r)
@@ -330,7 +361,8 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
                     st.images.forEach { im ->
                         val r = im.rect
                         drawImage(im.ib, dstOffset = IntOffset(r.left.toInt(), r.top.toInt()), dstSize = IntSize(r.width.toInt(), r.height.toInt()))
-                        drawRect(outline, r.topLeft, r.size, style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                        val sel = st.moving && st.selected === im
+                        drawRect(if (sel) accent else outline, r.topLeft, r.size, style = androidx.compose.ui.graphics.drawscope.Stroke((if (sel) 3 else 1).dp.toPx()))
                     }
                     drawIntoCanvas { cv ->
                         val n = cv.nativeCanvas
@@ -387,7 +419,7 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
                     leadingIcon = { Icon(d.type.icon, null, Modifier.size(18.dp)) })
             }
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (!st.moving) Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (st.erasing) Icons.Rounded.AutoFixNormal else Icons.Rounded.Brush, null, Modifier.size(18.dp), tint = cs.onSurfaceVariant)
             Slider(
                 value = if (st.erasing) st.eraserDp else st.penDp,
@@ -398,17 +430,22 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
         }
         Surface(shape = CircleShape, color = cs.surfaceContainerHighest, modifier = Modifier.padding(start = 8.dp, end = if (full) 8.dp else 34.dp, bottom = 8.dp)) {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                listOf(Triple(Icons.Rounded.Brush, "ペン", 0), Triple(Icons.Rounded.AutoFixNormal, "消しゴム", 1), Triple(Icons.Rounded.OpenWith, "カーソル", 2)).forEach { (ic, d, m) ->
+                    val on = when (m) { 1 -> st.erasing; 2 -> st.moving; else -> !st.erasing && !st.moving }
+                    val pick = { st.erasing = m == 1; st.moving = m == 2; if (m != 2) st.selected = null }
+                    if (on) FilledIconButton(onClick = pick, Modifier.size(36.dp)) { Icon(ic, d, Modifier.size(20.dp)) }
+                    else IconButton(onClick = pick, Modifier.size(36.dp)) { Icon(ic, d, Modifier.size(20.dp)) }
+                }
+                VerticalDivider(Modifier.height(24.dp).padding(horizontal = 4.dp))
                 inkColors.forEach { c ->
-                    val sel = !st.erasing && st.color == c
+                    val sel = !st.erasing && !st.moving && st.color == c
                     Box(
                         Modifier.padding(3.dp).size(if (sel) 26.dp else 20.dp)
                             .background(if (c == 0) cs.onSurface else Color(c), CircleShape)
                             .then(if (sel) Modifier.border(3.dp, cs.primary, CircleShape) else Modifier)
-                            .clickable { st.color = c; st.erasing = false }
+                            .clickable { st.color = c; st.erasing = false; st.moving = false; st.selected = null }
                     )
                 }
-                if (st.erasing) FilledIconButton(onClick = { st.erasing = false }, Modifier.size(36.dp)) { Icon(Icons.Rounded.AutoFixNormal, "消しゴム", Modifier.size(20.dp)) }
-                else IconButton(onClick = { st.erasing = true }, Modifier.size(36.dp)) { Icon(Icons.Rounded.AutoFixNormal, "消しゴム", Modifier.size(20.dp)) }
                 IconButton(onClick = { st.undo() }, Modifier.size(36.dp)) { Icon(Icons.Rounded.Undo, "元に戻す", Modifier.size(20.dp)) }
                 IconButton(onClick = { st.clear() }, Modifier.size(36.dp)) { Icon(Icons.Rounded.DeleteSweep, "消去", Modifier.size(20.dp)) }
                 IconButton(onClick = {

@@ -367,6 +367,9 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
 
 /** Full-screen Note shown over the lock screen (double-tap on the lock screen). */
 class LockNoteActivity : ComponentActivity() {
+    companion object { @Volatile var visible = false }
+    override fun onResume() { super.onResume(); visible = true }
+    override fun onPause() { visible = false; super.onPause() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setShowWhenLocked(true); setTurnScreenOn(true)

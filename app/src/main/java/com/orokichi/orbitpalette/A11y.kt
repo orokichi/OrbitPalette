@@ -29,20 +29,33 @@ class OrbitA11yService : AccessibilityService() {
     }
 
     // ---- Lock screen double-tap → LockNoteActivity ----
+    // A 1x1 overlay watches every touch-down (ACTION_OUTSIDE) while the screen is on; whether it counts
+    // is decided at tap time (keyguard really locked, note not already open). A 3rd quick tap means
+    // PIN typing: cancel and ignore taps until the screen turns off.
     private var lockView: View? = null
-    private var armed = false
     private var lastTap = 0L
+    private var count = 0
+    private var suppressed = false
+    private val h = android.os.Handler(android.os.Looper.getMainLooper())
+    private val fire = Runnable {
+        count = 0
+        if (locked() && !suppressed && !LockNoteActivity.visible)
+            startActivity(Intent(this, LockNoteActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+    }
     private val rx = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                Intent.ACTION_SCREEN_ON -> if (getSystemService(KeyguardManager::class.java).isKeyguardLocked) arm()
-                else -> disarm()
+                Intent.ACTION_SCREEN_ON -> { suppressed = false; count = 0; attach() }
+                Intent.ACTION_SCREEN_OFF -> { suppressed = false; count = 0; h.removeCallbacks(fire) }
+                else -> { count = 0; h.removeCallbacks(fire) } // USER_PRESENT
             }
         }
     }
 
-    private fun arm() {
-        armed = true; lastTap = 0L
+    private fun locked() = getSystemService(PowerManager::class.java).isInteractive &&
+        getSystemService(KeyguardManager::class.java).isKeyguardLocked
+
+    private fun attach() {
         if (lockView != null) return
         val v = object : View(this) {
             override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -52,26 +65,24 @@ class OrbitA11yService : AccessibilityService() {
         }
         val p = WindowManager.LayoutParams(1, 1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START }
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START }
         runCatching { getSystemService(WindowManager::class.java).addView(v, p); lockView = v }
     }
 
-    private fun disarm() {
-        armed = false
+    private fun detach() {
+        h.removeCallbacks(fire)
         lockView?.let { runCatching { getSystemService(WindowManager::class.java).removeView(it) } }; lockView = null
     }
 
-    /** Only the first gesture after waking counts, so PIN typing never triggers it. */
     private fun onOutsideTap() {
-        if (!armed) return
+        if (suppressed || LockNoteActivity.visible || !locked()) { count = 0; h.removeCallbacks(fire); return }
         val now = SystemClock.uptimeMillis()
+        count = if (now - lastTap <= 320) count + 1 else 1
+        lastTap = now
         when {
-            lastTap == 0L -> lastTap = now
-            now - lastTap <= 350 -> {
-                armed = false
-                startActivity(Intent(this, LockNoteActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
-            }
-            else -> armed = false
+            count == 2 -> h.postDelayed(fire, 330)
+            count >= 3 -> { h.removeCallbacks(fire); count = 0; suppressed = true }
         }
     }
 
@@ -80,10 +91,10 @@ class OrbitA11yService : AccessibilityService() {
         ContextCompat.registerReceiver(this, rx, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
         }, ContextCompat.RECEIVER_EXPORTED)
-        if (getSystemService(PowerManager::class.java).isInteractive && getSystemService(KeyguardManager::class.java).isKeyguardLocked) arm()
+        attach()
     }
-    override fun onUnbind(intent: Intent?): Boolean { instance = null; disarm(); runCatching { unregisterReceiver(rx) }; return super.onUnbind(intent) }
-    override fun onDestroy() { instance = null; disarm(); super.onDestroy() }
+    override fun onUnbind(intent: Intent?): Boolean { instance = null; detach(); runCatching { unregisterReceiver(rx) }; return super.onUnbind(intent) }
+    override fun onDestroy() { instance = null; detach(); super.onDestroy() }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
 
