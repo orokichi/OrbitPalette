@@ -171,6 +171,7 @@ class CanvasState(private val ctx: Context, private val name: String = "canvas",
         runCatching { File(ctx.filesDir, f).outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) } }
         val ci = CanvasImage(b, Rect((w - iw) / 2, top, (w + iw) / 2, top + ih), f)
         images.add(ci); ops.add(ci); saveImages(); tick++
+        erasing = false; moving = true; selected = ci
     }
 
     /** Pixel-like eraser: cuts the parts of strokes within radius r of p. */
@@ -430,7 +431,7 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
         }
         Surface(shape = CircleShape, color = cs.surfaceContainerHighest, modifier = Modifier.padding(start = 8.dp, end = if (full) 8.dp else 34.dp, bottom = 8.dp)) {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                listOf(Triple(Icons.Rounded.Brush, "ペン", 0), Triple(Icons.Rounded.AutoFixNormal, "消しゴム", 1), Triple(Icons.Rounded.OpenWith, "カーソル", 2)).forEach { (ic, d, m) ->
+                listOf(Triple(Icons.Rounded.Brush, "ペン", 0), Triple(Icons.Rounded.AutoFixNormal, "消しゴム", 1), Triple(Icons.Rounded.NearMe, "カーソル", 2)).forEach { (ic, d, m) ->
                     val on = when (m) { 1 -> st.erasing; 2 -> st.moving; else -> !st.erasing && !st.moving }
                     val pick = { st.erasing = m == 1; st.moving = m == 2; if (m != 2) st.selected = null }
                     if (on) FilledIconButton(onClick = pick, Modifier.size(36.dp)) { Icon(ic, d, Modifier.size(20.dp)) }
