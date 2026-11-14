@@ -271,7 +271,7 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
 
     fun relaunch() { Apps.launch(svc, app.cmp, bounds); place() }
 
-    fun setBounds(r: Rect) { bounds = Rect(r); maximized = false; minimized = false; relaunch() }
+    fun resizeTo(r: Rect) { bounds = Rect(r); maximized = false; minimized = false; relaunch() }
 
     fun toggleMax() {
         val s = svc.screen()
@@ -322,7 +322,7 @@ fun AppBar(f: AppFrame) {
             }
             androidx.compose.material3.IconButton(onClick = { f.minimize() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Remove, "最小化", Modifier.size(18.dp)) }
             Box(Modifier.size(36.dp).clip(CircleShape).combinedClickable(onClick = { f.toggleMax() },
-                onLongClick = { OverlayService.instance?.drawRect("新しいサイズを▢で描く") { r -> f.setBounds(r) } }), contentAlignment = Alignment.Center) {
+                onLongClick = { OverlayService.instance?.drawRect("新しいサイズを▢で描く") { r -> f.resizeTo(r) } }), contentAlignment = Alignment.Center) {
                 Icon(if (f.maximized) Icons.Rounded.FilterNone else Icons.Rounded.CropSquare, "最大化（長押しでサイズを描く）", Modifier.size(18.dp))
             }
             androidx.compose.material3.IconButton(onClick = { f.close() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, "閉じる", Modifier.size(18.dp)) }
