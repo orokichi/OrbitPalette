@@ -241,14 +241,19 @@ fun LoupeOverlay(onClose: () -> Unit) {
     }
 }
 
-// ================= Popup window (title bar, move, resize, minimize, maximize) =================
+// ================= Pop-up view (Galaxy Note style: handle bar, transparency, minimize to icon, corner resize) =================
 class FloatingWindow(
     private val svc: OverlayService, val tool: Tool, wDp: Int, hDp: Int,
-    private val wantsFocus: Boolean, val body: @Composable () -> Unit
+    private val wantsFocus: Boolean, val miniDp: Int = 58, val mini: (@Composable () -> Unit)? = null,
+    val body: @Composable () -> Unit
 ) {
     private val wm = svc.wm
     var minimized by mutableStateOf(false); private set
     var maximized by mutableStateOf(false); private set
+    var active by mutableStateOf(true)
+    var menu by mutableStateOf(false)
+    var showAlpha by mutableStateOf(false)
+    var alpha by mutableFloatStateOf(1f); private set
     private val beforeMax = IntArray(4)
     private val beforeMin = IntArray(4)
     private fun px(v: Int) = svc.dp(v.toFloat()).toInt()
@@ -263,7 +268,8 @@ class FloatingWindow(
 
     private val root = object : FrameLayout(svc) {
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-            if (ev.actionMasked == MotionEvent.ACTION_OUTSIDE) { focus(false); return false }
+            if (ev.actionMasked == MotionEvent.ACTION_OUTSIDE) { focus(false); active = false; menu = false; showAlpha = false; return false }
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) active = true
             // Changing window flags mid-gesture makes the system cancel the touch (buttons "don't press").
             // So become focusable only after the finger lifts.
             val r = super.dispatchTouchEvent(ev)
@@ -295,34 +301,48 @@ class FloatingWindow(
 
     fun moveBy(dx: Float, dy: Float) {
         val s = svc.screen()
-        params.x = (params.x + dx.toInt()).coerceIn(-params.width + px(80), s.width() - px(80))
-        params.y = (params.y + dy.toInt()).coerceIn(0, s.height() - px(56))
+        params.x = (params.x + dx.toInt()).coerceIn(-params.width + px(60), s.width() - px(60))
+        params.y = (params.y + dy.toInt()).coerceIn(0, s.height() - px(48))
         update()
     }
 
     fun resizeBy(dx: Float, dy: Float) {
         if (maximized) return
         val s = svc.screen()
-        params.width = (params.width + dx.toInt()).coerceIn(px(220), s.width())
-        params.height = (params.height + dy.toInt()).coerceIn(px(200), s.height())
+        params.width = (params.width + dx.toInt()).coerceIn(px(200), s.width())
+        params.height = (params.height + dy.toInt()).coerceIn(px(180), s.height())
         update()
     }
+
+    /** Bottom-left corner: width grows to the left. */
+    fun resizeLeftBy(dx: Float, dy: Float) {
+        if (maximized) return
+        val s = svc.screen()
+        val nw = (params.width - dx.toInt()).coerceIn(px(200), s.width())
+        params.x += params.width - nw; params.width = nw
+        params.height = (params.height + dy.toInt()).coerceIn(px(180), s.height())
+        update()
+    }
+
+    fun setAlpha(a: Float) { alpha = a; params.alpha = a; update() }
 
     fun toggleMax() {
         val s = svc.screen()
         if (!maximized) {
             save(beforeMax)
-            params.x = px(8); params.y = px(40); params.width = s.width() - px(16); params.height = s.height() - px(120)
+            params.x = 0; params.y = px(28); params.width = s.width(); params.height = s.height() - px(28)
         } else load(beforeMax)
-        maximized = !maximized; update()
+        maximized = !maximized; menu = false; update()
     }
 
+    /** Pop-up → floating icon (keeps its place near the window's top-right corner). */
     fun minimize() {
-        focus(false); save(beforeMin); minimized = true
-        params.width = px(64); params.height = px(64); update()
+        focus(false); save(beforeMin); minimized = true; menu = false; showAlpha = false
+        params.x = (params.x + params.width - px(miniDp + 8)).coerceAtLeast(0)
+        params.width = px(miniDp + 8); params.height = px(miniDp + 8); params.alpha = 1f; update()
     }
 
-    fun restore() { minimized = false; load(beforeMin); update() }
+    fun restore() { minimized = false; load(beforeMin); params.alpha = alpha; update() }
 
     /** Snap to a rectangle drawn on screen (screen coordinates). */
     fun setBounds(r: android.graphics.Rect) {
@@ -340,7 +360,7 @@ class FloatingWindow(
 
     fun clamp() {
         val s = svc.screen()
-        if (maximized) { params.x = px(8); params.y = px(40); params.width = s.width() - px(16); params.height = s.height() - px(120) }
+        if (maximized) { params.x = 0; params.y = px(28); params.width = s.width(); params.height = s.height() - px(28) }
         else {
             params.width = params.width.coerceAtMost(s.width()); params.height = params.height.coerceAtMost(s.height() - px(40))
             params.x = params.x.coerceIn(0, (s.width() - params.width).coerceAtLeast(0))
@@ -351,56 +371,91 @@ class FloatingWindow(
 }
 
 @Composable
-private fun ChromeButton(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) { Icon(icon, desc, Modifier.size(18.dp)) }
+private fun PopupMenuButton(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, on: Boolean = false, onLong: (() -> Unit)? = null, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Box(
+        Modifier.padding(horizontal = 3.dp).size(34.dp).clip(CircleShape)
+            .background(if (on) cs.primary else cs.secondaryContainer)
+            .combinedClickable(onClick = onClick, onLongClick = onLong),
+        contentAlignment = Alignment.Center
+    ) { Icon(icon, desc, Modifier.size(18.dp), tint = if (on) cs.onPrimary else cs.onSecondaryContainer) }
+}
+
+/** Minimized pop-up: round floating icon. Tap = restore, drag onto the trash = close. */
+@Composable
+fun MiniIcon(onTap: () -> Unit, onMove: (Float, Float) -> Unit, onClose: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        Modifier.fillMaxSize().padding(4.dp).rawDragFull(
+            onTap = onTap,
+            onEnd = { x, y -> val svc = OverlayService.instance; val hit = svc?.overTrash(x, y) == true; svc?.hideTrash(); if (hit) onClose() }
+        ) { dx, dy, x, y -> onMove(dx, dy); OverlayService.instance?.trackTrash(x, y) }
+    ) { content() }
 }
 
 @Composable
 fun WindowChrome(w: FloatingWindow) {
     val cs = MaterialTheme.colorScheme
     if (w.minimized) {
-        Box(Modifier.fillMaxSize().padding(4.dp)) {
-            Surface(shape = RoundedCornerShape(20.dp), color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, shadowElevation = 6.dp,
-                modifier = Modifier.fillMaxSize().rawDrag(onTap = { w.restore() }) { dx, dy -> w.moveBy(dx, dy) }) {
+        MiniIcon(onTap = { w.restore() }, onMove = { dx, dy -> w.moveBy(dx, dy) }, onClose = { w.close() }) {
+            val m = w.mini
+            if (m != null) m() else Surface(shape = CircleShape, color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, shadowElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(2.dp, cs.primary), modifier = Modifier.fillMaxSize()) {
                 Box(contentAlignment = Alignment.Center) { Icon(w.tool.icon, w.tool.label) }
             }
         }
         return
     }
+    val frame by animateColorAsState(if (w.active) cs.primary else cs.outlineVariant, label = "frame")
     Surface(
-        shape = RoundedCornerShape(28.dp), color = cs.surfaceContainerLow, shadowElevation = 10.dp,
-        modifier = Modifier.fillMaxSize().padding(6.dp)
+        shape = RoundedCornerShape(if (w.maximized) 0.dp else 16.dp), color = cs.surfaceContainerLow, shadowElevation = 10.dp,
+        border = androidx.compose.foundation.BorderStroke(if (w.active) 2.dp else 1.dp, frame),
+        modifier = Modifier.fillMaxSize().padding(if (w.maximized) 0.dp else 6.dp)
     ) {
-        Column {
-            Row(
-                Modifier.fillMaxWidth().height(48.dp).background(cs.surfaceContainerHigh).padding(start = 14.dp, end = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(Modifier.weight(1f).fillMaxHeight().rawDrag { dx, dy -> w.moveBy(dx, dy) }, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(w.tool.icon, null, tint = cs.primary, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(w.tool.label, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                }
-                ChromeButton(Icons.Rounded.Remove, "最小化") { w.minimize() }
-                // tap: maximize / long-press: minimize all and draw a box to resize
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                // Galaxy pop-up handle: drag to move, tap to show the control buttons
                 Box(
-                    Modifier.size(36.dp).clip(CircleShape).combinedClickable(
-                        onClick = { w.toggleMax() },
-                        onLongClick = { OverlayService.instance?.resizeByDrawing(w) }
-                    ), contentAlignment = Alignment.Center
-                ) { Icon(if (w.maximized) Icons.Rounded.FilterNone else Icons.Rounded.CropSquare, "最大化（長押しでサイズを描く）", Modifier.size(18.dp)) }
-                ChromeButton(Icons.Rounded.Close, "閉じる") { w.close() }
+                    Modifier.fillMaxWidth().height(24.dp).background(cs.surfaceContainerHigh)
+                        .rawDrag(onTap = { w.menu = !w.menu; if (!w.menu) w.showAlpha = false }) { dx, dy -> w.moveBy(dx, dy) },
+                    contentAlignment = Alignment.Center
+                ) { Box(Modifier.size(40.dp, 5.dp).background(if (w.active) cs.primary else cs.outline, CircleShape)) }
+                if (w.menu) {
+                    Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHigh).padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center) {
+                        PopupMenuButton(Icons.Rounded.Opacity, "透明度", w.showAlpha) { w.showAlpha = !w.showAlpha }
+                        PopupMenuButton(Icons.Rounded.Remove, "ポップアップを最小化") { w.minimize() }
+                        PopupMenuButton(if (w.maximized) Icons.Rounded.CloseFullscreen else Icons.Rounded.OpenInFull, "全画面（長押しでサイズを描く）",
+                            onLong = { w.menu = false; OverlayService.instance?.resizeByDrawing(w) }) { w.toggleMax() }
+                        PopupMenuButton(Icons.Rounded.Close, "閉じる") { w.close() }
+                    }
+                    if (w.showAlpha) Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHigh).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Opacity, null, Modifier.size(16.dp), tint = cs.onSurfaceVariant)
+                        Slider(value = w.alpha, onValueChange = { w.setAlpha(it) }, valueRange = 0.2f..1f, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth()) { w.body() }
             }
-            Box(Modifier.weight(1f).fillMaxWidth()) { w.body() }
-            if (!w.maximized) Box(Modifier.fillMaxWidth().height(18.dp)) {
-                Canvas(
-                    Modifier.align(Alignment.BottomEnd).size(18.dp).rawDrag { dx, dy -> w.resizeBy(dx, dy) }
-                ) {
-                    val c = cs.outline; val s = size.width
-                    drawLine(c, Offset(s * 0.35f, s * 0.8f), Offset(s * 0.8f, s * 0.35f), 2.dp.toPx())
-                    drawLine(c, Offset(s * 0.6f, s * 0.8f), Offset(s * 0.8f, s * 0.6f), 2.dp.toPx())
+            if (!w.maximized) {
+                // corner grips (bottom-left / bottom-right), Galaxy style arcs
+                Canvas(Modifier.align(Alignment.BottomEnd).size(24.dp).rawDrag { dx, dy -> w.resizeBy(dx, dy) }) {
+                    drawArc(frame, 0f, 90f, false, Offset(-size.width * 0.6f, -size.height * 0.6f), Size(size.width * 1.2f, size.height * 1.2f), style = Stroke(3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                }
+                Canvas(Modifier.align(Alignment.BottomStart).size(24.dp).rawDrag { dx, dy -> w.resizeLeftBy(dx, dy) }) {
+                    drawArc(frame, 90f, 90f, false, Offset(size.width * 0.4f, -size.height * 0.6f), Size(size.width * 1.2f, size.height * 1.2f), style = Stroke(3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
                 }
             }
+        }
+    }
+}
+
+/** Trash target shown while dragging a minimized pop-up icon. */
+@Composable
+fun TrashTarget(hot: () -> Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val h = hot()
+    val sz by animateDpAsState(if (h) 76.dp else 60.dp, label = "trash")
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Surface(shape = CircleShape, color = if (h) cs.error else cs.surfaceContainerHighest, shadowElevation = 6.dp, modifier = Modifier.size(sz)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Delete, "閉じる", tint = if (h) cs.onError else cs.onSurface) }
         }
     }
 }

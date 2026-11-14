@@ -111,7 +111,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     override fun onDestroy() {
-        listOfNotNull(bubble, paletteView, loupeView, thumbView, rectView).forEach { runCatching { wm.removeView(it) } }
+        listOfNotNull(bubble, paletteView, loupeView, thumbView, rectView, trashView).forEach { runCatching { wm.removeView(it) } }
         windows.values.toList().forEach { it.close() }
         appFrames.toList().forEach { it.remove() }
         stopService(Intent(this, CaptureService::class.java))
@@ -221,6 +221,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
             Tool.SCREENSHOT -> project("shot")
             Tool.TOUCHVIEW -> project("loupe")
             Tool.APPS -> drawRect("アプリを開く範囲を▢で囲む") { r -> openApps(r) }
+            Tool.MEMO -> openMemo()
             Tool.FLUX -> startActivity(Intent(this, FluxSearchActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
             else -> openWindow(t)
         }
@@ -374,6 +375,40 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     fun onWindowClosed(t: Tool) { windows.remove(t) }
+
+    // ---------- Action Memo (pop-up memo) ----------
+    val memoState by lazy { ActionMemoState(this) }
+
+    fun openMemo() {
+        windows[Tool.MEMO]?.let { if (it.minimized) it.restore(); it.bringToFront(); return }
+        memoState.fresh()
+        val w = FloatingWindow(this, Tool.MEMO, 290, 340, true, miniDp = 56, mini = { MemoMini(memoState) }) { ActionMemoTool(memoState) }
+        windows[Tool.MEMO] = w; w.show()
+    }
+
+    fun minimizeMemo() { windows[Tool.MEMO]?.let { if (!it.minimized) it.minimize() } }
+
+    // ---------- Trash target for minimized pop-ups ----------
+    private var trashView: View? = null
+    private var trashHot by mutableStateOf(false)
+
+    private fun trashCenter(): Pair<Float, Float> { val s = screen(); return s.width() / 2f to s.height() - dp(110f) }
+
+    fun overTrash(x: Float, y: Float): Boolean { val (cx, cy) = trashCenter(); return hypot(x - cx, y - cy) < dp(70f) }
+
+    fun trackTrash(x: Float, y: Float) {
+        if (trashView == null) {
+            val sz = dp(100f).toInt(); val (cx, cy) = trashCenter()
+            val v = composeView { TrashTarget { trashHot } }
+            wm.addView(v, overlayParams(sz, sz, LP.FLAG_NOT_FOCUSABLE or LP.FLAG_NOT_TOUCHABLE).apply { this.x = (cx - sz / 2).toInt(); this.y = (cy - sz / 2).toInt() })
+            trashView = v
+        }
+        val h = overTrash(x, y)
+        if (h && !trashHot) vibrate()
+        trashHot = h
+    }
+
+    fun hideTrash() { trashView?.let { runCatching { wm.removeView(it) } }; trashView = null; trashHot = false }
 
     // ---------- Screenshot ----------
     fun onShotDone(path: String) {

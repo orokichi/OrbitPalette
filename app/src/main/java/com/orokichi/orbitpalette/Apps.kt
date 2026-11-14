@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloseFullscreen
+import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.CropSquare
 import androidx.compose.material.icons.rounded.FilterNone
 import androidx.compose.material.icons.rounded.Remove
@@ -244,14 +246,14 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
     var minimized by mutableStateOf(false)
     var maximized by mutableStateOf(false)
     private var beforeMax = Rect(bounds)
-    private val barH get() = px(44f)
+    private val barH get() = px(30f)
     private val params = svc.overlayParams(0, 0, android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
     private var view: android.view.View? = null
 
     fun show() { place(); view = svc.composeView { AppBar(this) }; wm.addView(view, params) }
 
     private fun place() {
-        if (minimized) { params.width = px(64f); params.height = px(64f) }
+        if (minimized) { params.width = px(64f); params.height = px(64f); params.x = (bounds.right - px(64f)).coerceAtLeast(0); params.y = (bounds.top - barH).coerceAtLeast(0) }
         else {
             params.width = bounds.width(); params.height = barH
             params.x = bounds.left
@@ -302,30 +304,29 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
 fun AppBar(f: AppFrame) {
     val cs = MaterialTheme.colorScheme
     if (f.minimized) {
-        Box(Modifier.fillMaxSize().padding(4.dp)) {
-            androidx.compose.material3.Surface(shape = RoundedCornerShape(20.dp), color = cs.primaryContainer, shadowElevation = 6.dp,
-                modifier = Modifier.fillMaxSize().rawDrag(onTap = { f.restore() }) { dx, dy -> f.moveBy(dx, dy) }) {
-                Box(contentAlignment = Alignment.Center) { Image(f.app.icon, f.app.label, Modifier.size(36.dp)) }
+        MiniIcon(onTap = { f.restore() }, onMove = { dx, dy -> f.moveBy(dx, dy) }, onClose = { f.close() }) {
+            androidx.compose.material3.Surface(shape = CircleShape, color = cs.surfaceContainerHigh, shadowElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(2.dp, cs.primary), modifier = Modifier.fillMaxSize()) {
+                Box(contentAlignment = Alignment.Center) { Image(f.app.icon, f.app.label, Modifier.size(34.dp)) }
             }
         }
         return
     }
-    androidx.compose.material3.Surface(shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), color = cs.surfaceContainerHigh, shadowElevation = 6.dp, modifier = Modifier.fillMaxSize()) {
-        androidx.compose.foundation.layout.Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.foundation.layout.Row(
-                Modifier.weight(1f).fillMaxSize().rawDragEnd(onEnd = { f.moveDone() }) { dx, dy -> f.moveBy(dx, dy) },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Image(f.app.icon, null, Modifier.size(22.dp))
-                androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
-                Text(f.app.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    var menu by remember { mutableStateOf(false) }
+    androidx.compose.material3.Surface(shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp), color = cs.surfaceContainerHigh, shadowElevation = 6.dp,
+        border = androidx.compose.foundation.BorderStroke(2.dp, cs.primary), modifier = Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().rawDragFull(onTap = { menu = !menu }, onEnd = { _, _ -> f.moveDone() }) { dx, dy, _, _ -> f.moveBy(dx, dy) })
+            Image(f.app.icon, null, Modifier.align(Alignment.CenterStart).padding(start = 10.dp).size(18.dp))
+            Box(Modifier.align(Alignment.Center).size(40.dp, 5.dp).background(cs.primary, CircleShape))
+            if (menu) androidx.compose.foundation.layout.Row(Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)) {
+                androidx.compose.material3.IconButton(onClick = { menu = false; f.minimize() }, modifier = Modifier.size(30.dp)) { Icon(Icons.Rounded.Remove, "最小化", Modifier.size(17.dp)) }
+                Box(Modifier.size(30.dp).clip(CircleShape).combinedClickable(onClick = { menu = false; f.toggleMax() },
+                    onLongClick = { menu = false; OverlayService.instance?.drawRect("新しいサイズを▢で描く") { r -> f.resizeTo(r) } }), contentAlignment = Alignment.Center) {
+                    Icon(if (f.maximized) Icons.Rounded.CloseFullscreen else Icons.Rounded.OpenInFull, "全画面（長押しでサイズを描く）", Modifier.size(17.dp))
+                }
+                androidx.compose.material3.IconButton(onClick = { f.close() }, modifier = Modifier.size(30.dp)) { Icon(Icons.Rounded.Close, "閉じる", Modifier.size(17.dp)) }
             }
-            androidx.compose.material3.IconButton(onClick = { f.minimize() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Remove, "最小化", Modifier.size(18.dp)) }
-            Box(Modifier.size(36.dp).clip(CircleShape).combinedClickable(onClick = { f.toggleMax() },
-                onLongClick = { OverlayService.instance?.drawRect("新しいサイズを▢で描く") { r -> f.resizeTo(r) } }), contentAlignment = Alignment.Center) {
-                Icon(if (f.maximized) Icons.Rounded.FilterNone else Icons.Rounded.CropSquare, "最大化（長押しでサイズを描く）", Modifier.size(18.dp))
-            }
-            androidx.compose.material3.IconButton(onClick = { f.close() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, "閉じる", Modifier.size(18.dp)) }
         }
     }
 }

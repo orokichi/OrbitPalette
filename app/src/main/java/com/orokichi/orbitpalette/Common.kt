@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Email
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Screenshot
+import androidx.compose.material.icons.rounded.StickyNote2
 import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
@@ -92,6 +93,7 @@ enum class Tool(val label: String, val icon: ImageVector) {
     TOUCHVIEW("TouchView", Icons.Rounded.ZoomIn),
     APPS("Apps", Icons.Rounded.Apps),
     FLUX("Flux Search", FluxIcon),
+    MEMO("アクションメモ", Icons.Rounded.StickyNote2),
     CALC("電卓", Icons.Rounded.Calculate),
     NOTE("WriteNote", Icons.Rounded.EditNote);
 
@@ -191,6 +193,30 @@ fun Modifier.rawDrag(onTap: (() -> Unit)? = null, onDrag: (Float, Float) -> Unit
                 st[0] = e.rawX; st[1] = e.rawY
             }
             MotionEvent.ACTION_UP -> if (!mv[0]) onTap?.invoke()
+        }
+        true
+    }
+}
+
+/** rawDrag with tap, raw position while moving, and the drop position (only when it actually moved). */
+@OptIn(ExperimentalComposeUiApi::class)
+fun Modifier.rawDragFull(
+    onTap: (() -> Unit)? = null, onEnd: (Float, Float) -> Unit = { _, _ -> },
+    onDrag: (dx: Float, dy: Float, x: Float, y: Float) -> Unit
+): Modifier = composed {
+    val st = remember { FloatArray(4) }
+    val mv = remember { BooleanArray(1) }
+    val slop = with(LocalDensity.current) { 8.dp.toPx() }
+    pointerInteropFilter { e ->
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { st[0] = e.rawX; st[1] = e.rawY; st[2] = e.rawX; st[3] = e.rawY; mv[0] = false }
+            MotionEvent.ACTION_MOVE -> {
+                if (!mv[0] && hypot(e.rawX - st[2], e.rawY - st[3]) > slop) mv[0] = true
+                if (mv[0]) onDrag(e.rawX - st[0], e.rawY - st[1], e.rawX, e.rawY)
+                st[0] = e.rawX; st[1] = e.rawY
+            }
+            MotionEvent.ACTION_UP -> if (!mv[0]) onTap?.invoke() else onEnd(e.rawX, e.rawY)
+            MotionEvent.ACTION_CANCEL -> if (mv[0]) onEnd(e.rawX, e.rawY)
         }
         true
     }
