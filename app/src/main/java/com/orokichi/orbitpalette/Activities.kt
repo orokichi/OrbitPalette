@@ -223,7 +223,6 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
     val marks = remember { mutableStateListOf<Mark>() }
     val redo = remember { mutableStateListOf<Mark>() }
     val live = remember { mutableStateListOf<Offset>() }
-    var predicted by remember { mutableStateOf<Offset?>(null) }
     val view = androidx.compose.ui.platform.LocalView.current
     val pen = remember { PenTracker(view, ctx) }
     var tool by remember { mutableStateOf(EditTool.PEN) }
@@ -329,9 +328,9 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
                                 val ev = awaitPointerEvent()
                                 val c = ev.changes.firstOrNull { it.id == down.id } ?: break
                                 if (!c.pressed) break
-                                pen.move(this, c).forEach { live.add(it / scale) }; predicted = pen.predicted?.div(scale); c.consume()
+                                pen.move(this, c).forEach { live.add(it / scale) }; c.consume()
                             }
-                            pen.end(); predicted = null
+                            pen.end()
                             if (live.size > 0) marks.add(liveMark(live.toList()))
                             redo.clear(); live.clear()
                         }
@@ -352,7 +351,7 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
                             val n = cv.nativeCanvas
                             n.saveLayer(null, null); n.scale(scale, scale)
                             marks.forEach { drawMark(n, it) }
-                            if (live.isNotEmpty()) drawMark(n, liveMark(predicted?.let { live.toList() + it } ?: live.toList()))
+                            if (live.isNotEmpty()) drawMark(n, liveMark(live.toList()))
                             n.restore()
                         }
                     }

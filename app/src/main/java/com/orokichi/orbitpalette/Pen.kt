@@ -2,6 +2,8 @@ package com.orokichi.orbitpalette
 
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -10,6 +12,7 @@ import android.view.View
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
+import kotlin.math.abs
 
 object PenPrefs {
     private fun sp(c: Context) = c.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -19,82 +22,78 @@ object PenPrefs {
 
 /**
  * Shared pen input for every drawing surface: uses all batched (historical) samples at sub-pixel
- * precision, predicts the next position with MotionEventPredictor to hide latency, filters jitter,
- * and (pencil mode) gives fine haptic grain while writing.
+ * precision and filters jitter. Pencil mode: one continuous vibration whose strength follows the
+ * writing speed (smooth "buuuun", not ticks), stopping when the pen rests.
  */
-class PenTracker(private val view: View, private val ctx: Context) {
-    private val hist = ArrayDeque<Triple<Float, Float, Long>>()
+class PenTracker(@Suppress("unused") private val view: View, private val ctx: Context) {
     private var pencil = false
     private var vib: Vibrator? = null
-    private var travel = 0f
-    private var lastBuzz = 0L
+    private var amp = false
     private var last: Offset? = null
     private var lastT = 0L
-    private val step = 4f * ctx.resources.displayMetrics.density
-    private var prims = false
-    var predicted: Offset? = null; private set
+    private var speed = 0f          // smoothed px/ms
+    private var curAmp = 0
+    private var lastSet = 0L
+    private var lastMove = 0L
+    private val dens = ctx.resources.displayMetrics.density
+    private val h = Handler(Looper.getMainLooper())
+    private val idle = object : Runnable {
+        override fun run() {
+            if (curAmp == 0) return
+            if (SystemClock.uptimeMillis() - lastMove > 70) { speed = 0f; setAmp(0) } else h.postDelayed(this, 40)
+        }
+    }
 
-    fun begin(scope: AwaitPointerEventScope, down: PointerInputChange): Offset {
-        hist.clear(); hist.addLast(Triple(down.position.x, down.position.y, down.uptimeMillis))
+    fun begin(@Suppress("UNUSED_PARAMETER") scope: AwaitPointerEventScope, down: PointerInputChange): Offset {
         pencil = PenPrefs.pencil(ctx)
         if (pencil && vib == null) {
             vib = if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(VibratorManager::class.java)?.defaultVibrator
             else @Suppress("DEPRECATION") ctx.getSystemService(Vibrator::class.java)
-            prims = vib?.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK) == true
+            amp = vib?.hasAmplitudeControl() == true
         }
-        travel = 0f; last = down.position; lastT = down.uptimeMillis; predicted = null
+        last = down.position; lastT = down.uptimeMillis; speed = 0f; curAmp = 0
         return down.position
     }
 
     /** All new points for this change (historical + current), jitter < 0.25px dropped. */
-    fun move(scope: AwaitPointerEventScope, c: PointerInputChange): List<Offset> {
+    fun move(@Suppress("UNUSED_PARAMETER") scope: AwaitPointerEventScope, c: PointerInputChange): List<Offset> {
         val out = ArrayList<Offset>(c.historical.size + 1)
         c.historical.forEach { add(out, it.position, it.uptimeMillis) }
         add(out, c.position, c.uptimeMillis)
-        hist.addLast(Triple(c.position.x, c.position.y, c.uptimeMillis))
-        while (hist.size > 2 && c.uptimeMillis - hist.first().third > 40) hist.removeFirst()
-        predicted = predict()
+        if (pencil && out.isNotEmpty()) feel()
         return out
     }
 
-    fun end() { predicted = null; last = null; hist.clear() }
-
-    /** Extrapolates ~16 ms ahead from velocity over the last 40 ms (damped, capped) to hide display latency. */
-    private fun predict(): Offset? {
-        if (hist.size < 3) return null
-        val a = hist.first(); val b = hist.last()
-        val dt = (b.third - a.third).toFloat()
-        if (dt < 4f) return null
-        val vx = (b.first - a.first) / dt; val vy = (b.second - a.second) / dt
-        val k = 16f * 0.8f
-        var dx = vx * k; var dy = vy * k
-        val d = kotlin.math.hypot(dx, dy); val cap = 48f
-        if (d > cap) { dx *= cap / d; dy *= cap / d }
-        if (d < 0.5f) return null
-        return Offset(b.first + dx, b.second + dy)
-    }
+    fun end() { last = null; h.removeCallbacks(idle); if (curAmp != 0) setAmp(0) }
 
     private fun add(out: MutableList<Offset>, p: Offset, t: Long) {
         val l = last
         if (l != null && (p - l).getDistance() < 0.25f) return
-        if (l != null && pencil) grain((p - l).getDistance(), (t - lastT).coerceAtLeast(1))
+        if (l != null) {
+            val dt = (t - lastT).coerceAtLeast(1).toFloat()
+            val v = (p - l).getDistance() / dens / dt   // dp per ms
+            speed += (v - speed) * 0.25f
+        }
         out.add(p); last = p; lastT = t
     }
 
-    private fun grain(d: Float, dt: Long) {
-        travel += d
-        if (travel < step) return
-        travel = 0f
-        val now = SystemClock.uptimeMillis()
-        if (now - lastBuzz < 14) return
-        lastBuzz = now
-        val speed = d / dt // px per ms
+    private fun feel() {
+        lastMove = SystemClock.uptimeMillis()
+        // ~0.05 dp/ms (slow) → faint, ~2 dp/ms (fast) → stronger. Kept subtle.
+        val a = if (speed < 0.02f) 0 else (18 + speed * 45f).toInt().coerceIn(18, 110)
+        val now = lastMove
+        if ((abs(a - curAmp) >= 8 || (a == 0) != (curAmp == 0)) && now - lastSet >= 45) setAmp(a)
+        h.removeCallbacks(idle); h.postDelayed(idle, 40)
+    }
+
+    private fun setAmp(a: Int) {
         val v = vib ?: return
+        lastSet = SystemClock.uptimeMillis()
+        curAmp = a
         runCatching {
-            if (prims) {
-                val s = (0.12f + speed * 0.08f).coerceIn(0.1f, 0.45f)
-                v.vibrate(VibrationEffect.startComposition().addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK, s).compose())
-            } else if (v.hasAmplitudeControl()) v.vibrate(VibrationEffect.createOneShot(3, (30 + speed * 20).toInt().coerceIn(20, 90)))
+            if (a == 0) v.cancel()
+            else if (amp) v.vibrate(VibrationEffect.createWaveform(longArrayOf(5000), intArrayOf(a), 0))
+            else v.vibrate(VibrationEffect.createWaveform(longArrayOf(5000), 0))
         }
     }
 }

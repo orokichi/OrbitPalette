@@ -370,7 +370,7 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
                     drawIntoCanvas { cv ->
                         val n = cv.nativeCanvas
                         st.strokes.forEach { s -> n.drawPath(smoothPath(s.pts), strokePaint(if (s.color == 0) ink else s.color, s.width)) }
-                        current?.let { s -> n.drawPath(smoothPath(pen.predicted?.let { s.pts + it } ?: s.pts), strokePaint(if (s.color == 0) ink else s.color, s.width)) }
+                        current?.let { s -> n.drawPath(smoothPath(s.pts), strokePaint(if (s.color == 0) ink else s.color, s.width)) }
                     }
                     if (st.smart) st.groups.forEach { g ->
                         if (g.links.isNotEmpty()) {
