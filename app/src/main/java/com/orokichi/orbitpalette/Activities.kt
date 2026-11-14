@@ -219,9 +219,7 @@ class EditorActivity : ComponentActivity() {
 
 private val editColors = listOf(0xFFE53935.toInt(), 0xFFFFC107.toInt(), 0xFF43A047.toInt(), 0xFF1E88E5.toInt(), 0xFF000000.toInt(), 0xFFFFFFFF.toInt())
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 private fun BubbleSettings() {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
@@ -253,6 +251,7 @@ private fun BubbleSettings() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
     val ctx = LocalContext.current
