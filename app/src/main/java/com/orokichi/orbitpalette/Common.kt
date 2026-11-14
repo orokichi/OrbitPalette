@@ -182,6 +182,21 @@ fun Modifier.rawDrag(onTap: (() -> Unit)? = null, onDrag: (Float, Float) -> Unit
     }
 }
 
+/** Like rawDrag but reports when the drag ends (finger up). */
+@OptIn(ExperimentalComposeUiApi::class)
+fun Modifier.rawDragEnd(onEnd: () -> Unit, onDrag: (Float, Float) -> Unit): Modifier = composed {
+    val last = remember { FloatArray(2) }
+    val mv = remember { BooleanArray(1) }
+    pointerInteropFilter { e ->
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { last[0] = e.rawX; last[1] = e.rawY; mv[0] = false }
+            MotionEvent.ACTION_MOVE -> { onDrag(e.rawX - last[0], e.rawY - last[1]); last[0] = e.rawX; last[1] = e.rawY; mv[0] = true }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (mv[0]) onEnd()
+        }
+        true
+    }
+}
+
 fun smoothPath(pts: List<Offset>): Path {
     val p = Path()
     if (pts.isEmpty()) return p

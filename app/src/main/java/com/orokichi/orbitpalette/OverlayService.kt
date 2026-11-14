@@ -113,6 +113,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     override fun onDestroy() {
         listOfNotNull(bubble, paletteView, loupeView, thumbView, rectView).forEach { runCatching { wm.removeView(it) } }
         windows.values.toList().forEach { it.close() }
+        appFrames.toList().forEach { it.remove() }
         stopService(Intent(this, CaptureService::class.java))
         instance = null
         super.onDestroy()
@@ -327,6 +328,8 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
 
     // ---------- Draw a box (Apps / resize) ----------
     private var rectView: View? = null
+    private val appFrames = mutableListOf<AppFrame>()
+    fun onAppFrameClosed(f: AppFrame) { appFrames.remove(f) }
 
     fun drawRect(hint: String, onRect: (Rect) -> Unit) {
         if (rectView != null) return
@@ -351,7 +354,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
             AppsPicker(r, s) { a ->
                 w.close()
                 if (!Apps.freeformEnabled(this)) Toast.makeText(this, "フリーフォームが無効のため全画面で開きます（アプリの設定から有効化）", Toast.LENGTH_LONG).show()
-                Apps.launch(this, a.cmp, r)
+                if (Apps.launch(this, a.cmp, r)) AppFrame(this, a, r).also { appFrames.add(it); it.show() }
             }
         }
         w.setBounds(r)

@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 package com.orokichi.orbitpalette
 
 import android.app.ActivityOptions
@@ -28,6 +29,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CropSquare
+import androidx.compose.material.icons.rounded.FilterNone
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -225,5 +230,102 @@ fun RectDrawOverlay(hint: String, onRect: (Rect) -> Unit, onCancel: () -> Unit) 
         Text(hint, color = Color.White, style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 64.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape).padding(horizontal = 20.dp, vertical = 10.dp))
         FilledIconButton(onClick = onCancel, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp)) { Icon(Icons.Rounded.Close, "キャンセル") }
+    }
+}
+
+/**
+ * Title bar pinned above a freeform app launched from Apps. Android doesn't let us control another app's
+ * window directly, so: move/resize/maximize = relaunch with new bounds, minimize = Home (bar becomes a chip),
+ * close = Back.
+ */
+class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: Rect) {
+    private val wm = svc.wm
+    private fun px(v: Float) = svc.dp(v).toInt()
+    var minimized by mutableStateOf(false)
+    var maximized by mutableStateOf(false)
+    private var beforeMax = Rect(bounds)
+    private val barH get() = px(44f)
+    private val params = svc.overlayParams(0, 0, android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+    private var view: android.view.View? = null
+
+    fun show() { place(); view = svc.composeView { AppBar(this) }; wm.addView(view, params) }
+
+    private fun place() {
+        if (minimized) { params.width = px(64f); params.height = px(64f) }
+        else {
+            params.width = bounds.width(); params.height = barH
+            params.x = bounds.left
+            params.y = if (bounds.top - barH >= 0) bounds.top - barH else bounds.top
+        }
+        view?.let { runCatching { wm.updateViewLayout(it, params) } }
+    }
+
+    fun moveBy(dx: Float, dy: Float) { params.x += dx.toInt(); params.y += dy.toInt(); view?.let { runCatching { wm.updateViewLayout(it, params) } } }
+
+    fun moveDone() {
+        if (minimized) return
+        val top = if (bounds.top - barH >= 0) params.y + barH else params.y
+        bounds = Rect(params.x, top, params.x + bounds.width(), top + bounds.height())
+        relaunch()
+    }
+
+    fun relaunch() { Apps.launch(svc, app.cmp, bounds); place() }
+
+    fun setBounds(r: Rect) { bounds = Rect(r); maximized = false; minimized = false; relaunch() }
+
+    fun toggleMax() {
+        val s = svc.screen()
+        if (!maximized) { beforeMax = Rect(bounds); bounds = Rect(0, px(44f) + px(28f), s.width(), s.height()); maximized = true }
+        else { bounds = Rect(beforeMax); maximized = false }
+        relaunch()
+    }
+
+    fun minimize() {
+        minimized = true
+        OrbitA11yService.instance?.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
+        place()
+    }
+
+    fun restore() { minimized = false; relaunch() }
+
+    fun close() {
+        remove()
+        val a = OrbitA11yService.instance ?: return
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        repeat(3) { i -> h.postDelayed({ a.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK) }, 80L + i * 150L) }
+    }
+
+    fun remove() { view?.let { runCatching { wm.removeView(it) } }; view = null; svc.onAppFrameClosed(this) }
+}
+
+@Composable
+fun AppBar(f: AppFrame) {
+    val cs = MaterialTheme.colorScheme
+    if (f.minimized) {
+        Box(Modifier.fillMaxSize().padding(4.dp)) {
+            androidx.compose.material3.Surface(shape = RoundedCornerShape(20.dp), color = cs.primaryContainer, shadowElevation = 6.dp,
+                modifier = Modifier.fillMaxSize().rawDrag(onTap = { f.restore() }) { dx, dy -> f.moveBy(dx, dy) }) {
+                Box(contentAlignment = Alignment.Center) { Image(f.app.icon, f.app.label, Modifier.size(36.dp)) }
+            }
+        }
+        return
+    }
+    androidx.compose.material3.Surface(shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), color = cs.surfaceContainerHigh, shadowElevation = 6.dp, modifier = Modifier.fillMaxSize()) {
+        androidx.compose.foundation.layout.Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.layout.Row(
+                Modifier.weight(1f).fillMaxSize().rawDragEnd(onEnd = { f.moveDone() }) { dx, dy -> f.moveBy(dx, dy) },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(f.app.icon, null, Modifier.size(22.dp))
+                androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+                Text(f.app.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            androidx.compose.material3.IconButton(onClick = { f.minimize() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Remove, "最小化", Modifier.size(18.dp)) }
+            Box(Modifier.size(36.dp).clip(CircleShape).combinedClickable(onClick = { f.toggleMax() },
+                onLongClick = { OverlayService.instance?.drawRect("新しいサイズを▢で描く") { r -> f.setBounds(r) } }), contentAlignment = Alignment.Center) {
+                Icon(if (f.maximized) Icons.Rounded.FilterNone else Icons.Rounded.CropSquare, "最大化（長押しでサイズを描く）", Modifier.size(18.dp))
+            }
+            androidx.compose.material3.IconButton(onClick = { f.close() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, "閉じる", Modifier.size(18.dp)) }
+        }
     }
 }

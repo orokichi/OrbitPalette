@@ -160,9 +160,14 @@ fun LoupeOverlay(onClose: () -> Unit) {
     val ver by FrameHub.version.collectAsState()
     var finger by remember { mutableStateOf<Offset?>(null) }
     var zoom by remember { mutableFloatStateOf(2.5f) }
+    var lensDp by remember { mutableFloatStateOf(76f) }
+    var barOff by remember { mutableStateOf(Offset.Zero) }
+    var pinned by remember { mutableStateOf<Offset?>(null) } // fixed lens centre, or null = follows finger
+    var pinMode by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     val paint = remember { Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG) }
     val path = remember { android.graphics.Path() }
+    val barAlpha by animateFloatAsState(if (finger != null) 0f else 1f, label = "bar")
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().pointerInteropFilter { e ->
             when (e.actionMasked) {
@@ -174,32 +179,62 @@ fun LoupeOverlay(onClose: () -> Unit) {
             ver
             val f = finger ?: return@drawBehind
             val bmp = FrameHub.latest ?: return@drawBehind
-            val r = 76.dp.toPx(); val gap = r + 56.dp.toPx()
-            val c = if (f.y - gap - r < 0) Offset(f.x, f.y + gap) else Offset(f.x, f.y - gap)
+            val r = lensDp.dp.toPx(); val gap = r + 48.dp.toPx(); val m = 8.dp.toPx()
+            // Lens position: pinned, else the first side (above, below, left, right) that fits on screen.
+            val c = pinned ?: run {
+                val cands = listOf(Offset(f.x, f.y - gap), Offset(f.x, f.y + gap), Offset(f.x - gap, f.y), Offset(f.x + gap, f.y))
+                val fit = cands.firstOrNull { it.x - r >= m && it.x + r <= size.width - m && it.y - r >= m && it.y + r <= size.height - m }
+                val p = fit ?: cands.maxBy { kotlin.math.min(kotlin.math.min(it.x, size.width - it.x), kotlin.math.min(it.y, size.height - it.y)) }
+                Offset(p.x.coerceIn(r + m, size.width - r - m), p.y.coerceIn(r + m, size.height - r - m))
+            }
+            // Source square clamped inside the screenshot so edges stay fully visible; crosshair marks the real point.
             val half = r / zoom
-            val src = android.graphics.Rect((f.x - half).toInt(), (f.y - half).toInt(), (f.x + half).toInt(), (f.y + half).toInt())
+            val bw = bmp.width.toFloat(); val bh = bmp.height.toFloat()
+            val sx = (f.x - half).coerceIn(0f, (bw - 2 * half).coerceAtLeast(0f)); val sy = (f.y - half).coerceIn(0f, (bh - 2 * half).coerceAtLeast(0f))
+            val src = android.graphics.Rect(sx.toInt(), sy.toInt(), (sx + 2 * half).toInt(), (sy + 2 * half).toInt())
             val dst = RectF(c.x - r, c.y - r, c.x + r, c.y + r)
+            val mark = Offset(c.x - r + (f.x - sx) * zoom, c.y - r + (f.y - sy) * zoom)
             drawCircle(Color.Black.copy(alpha = 0.25f), r + 6.dp.toPx(), c + Offset(0f, 4.dp.toPx()))
             drawIntoCanvas { cv ->
                 val n = cv.nativeCanvas
                 n.save(); path.reset(); path.addCircle(c.x, c.y, r, android.graphics.Path.Direction.CW)
                 n.clipPath(path); n.drawColor(cs.surface.toArgb()); n.drawBitmap(bmp, src, dst, paint); n.restore()
             }
+            val cl = 7.dp.toPx()
+            if ((mark - c).getDistance() < r) {
+                drawLine(cs.primary, mark - Offset(cl, 0f), mark + Offset(cl, 0f), 2.dp.toPx())
+                drawLine(cs.primary, mark - Offset(0f, cl), mark + Offset(0f, cl), 2.dp.toPx())
+            }
             drawCircle(cs.primary, r, c, style = Stroke(5.dp.toPx()))
             drawCircle(cs.primary, 18.dp.toPx(), f, style = Stroke(2.dp.toPx()))
         })
+        // Toolbar: drag the handle anywhere; fades out while you trace so nothing stays hidden under it.
         Surface(
             shape = CircleShape, color = cs.surfaceContainerHigh, shadowElevation = 6.dp,
             modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 12.dp)
+                .offset { IntOffset(barOff.x.roundToInt(), barOff.y.roundToInt()) }.graphicsLayer { alpha = barAlpha }
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
+                Icon(Icons.Rounded.DragIndicator, "移動", tint = cs.onSurfaceVariant,
+                    modifier = Modifier.size(40.dp).rawDrag { dx, dy -> barOff += Offset(dx, dy) }.padding(8.dp))
                 IconButton(onClick = { zoom = (zoom - 0.5f).coerceAtLeast(1.5f) }) { Icon(Icons.Rounded.ZoomOut, "縮小") }
-                Text("TouchView  ${"%.1f".format(zoom)}x", style = MaterialTheme.typography.labelLarge)
-                IconButton(onClick = { zoom = (zoom + 0.5f).coerceAtMost(6f) }) { Icon(Icons.Rounded.ZoomIn, "拡大") }
+                Text("${"%.1f".format(zoom)}x", style = MaterialTheme.typography.labelLarge)
+                IconButton(onClick = { zoom = (zoom + 0.5f).coerceAtMost(8f) }) { Icon(Icons.Rounded.ZoomIn, "拡大") }
+                IconButton(onClick = { lensDp = when { lensDp < 70f -> 76f; lensDp < 100f -> 110f; else -> 56f } }) { Icon(Icons.Rounded.PhotoSizeSelectLarge, "レンズの大きさ") }
+                IconButton(onClick = { if (pinned != null) { pinned = null; pinMode = false } else pinMode = true }) {
+                    Icon(if (pinned != null || pinMode) Icons.Rounded.PushPin else Icons.Rounded.PushPin, "レンズを固定", tint = if (pinned != null || pinMode) cs.primary else cs.onSurfaceVariant)
+                }
                 FilledIconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "終了") }
             }
         }
-        if (finger == null) Text(
+        if (pinMode && pinned == null) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)).pointerInteropFilter { e ->
+            if (e.actionMasked == MotionEvent.ACTION_UP) { pinned = Offset(e.rawX, e.rawY); pinMode = false }
+            true
+        }) {
+            Text("レンズを置く場所をタップ", color = Color.White, style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = 0.5f), CircleShape).padding(horizontal = 20.dp, vertical = 10.dp))
+        }
+        else if (finger == null) Text(
             "画面をなぞると拡大します", color = Color.White, style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = 0.5f), CircleShape).padding(horizontal = 20.dp, vertical = 10.dp)
         )
