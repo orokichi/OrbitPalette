@@ -221,6 +221,7 @@ private val editColors = listOf(0xFFE53935.toInt(), 0xFFFFC107.toInt(), 0xFF43A0
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 private fun BubbleSettings() {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
@@ -243,9 +244,9 @@ private fun BubbleSettings() {
             row("フローティングボタン", "ボタンからパレットを開く方式も使う", on) { on = it; UiPrefs.set(ctx, "bubble", it) }
             if (on) {
                 Text("サイズ ${size.toInt()}dp", style = MaterialTheme.typography.labelLarge)
-                Slider(size, { size = it }, valueRange = 32f..80f, onValueChangeFinished = { UiPrefs.set(ctx, "bubbleDp", size) })
+                Slider(value = size, onValueChange = { size = it }, valueRange = 32f..80f, onValueChangeFinished = { UiPrefs.set(ctx, "bubbleDp", size) })
                 Text("不透明度 ${(alpha * 100).toInt()}%", style = MaterialTheme.typography.labelLarge)
-                Slider(alpha, { alpha = it }, valueRange = 0.2f..1f, onValueChangeFinished = { UiPrefs.set(ctx, "bubbleAlpha", alpha) })
+                Slider(value = alpha, onValueChange = { alpha = it }, valueRange = 0.2f..1f, onValueChangeFinished = { UiPrefs.set(ctx, "bubbleAlpha", alpha) })
                 row("端に吸着", "離すと画面の左右端に寄せる", snap) { snap = it; UiPrefs.set(ctx, "bubbleSnap", it) }
             }
         }
