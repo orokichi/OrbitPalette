@@ -324,7 +324,7 @@ class FloatingWindow(
         update()
     }
 
-    fun setAlpha(a: Float) { alpha = a; params.alpha = a; update() }
+    fun applyAlpha(a: Float) { alpha = a; params.alpha = a; update() }
 
     fun toggleMax() {
         val s = svc.screen()
@@ -429,7 +429,7 @@ fun WindowChrome(w: FloatingWindow) {
                     }
                     if (w.showAlpha) Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHigh).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.Opacity, null, Modifier.size(16.dp), tint = cs.onSurfaceVariant)
-                        Slider(value = w.alpha, onValueChange = { w.setAlpha(it) }, valueRange = 0.2f..1f, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                        Slider(value = w.alpha, onValueChange = { w.applyAlpha(it) }, valueRange = 0.2f..1f, modifier = Modifier.weight(1f).padding(start = 8.dp))
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) { w.body() }
