@@ -49,12 +49,29 @@ object TaskCtl {
         }.getOrNull()
     }
 
+    private var resizeM: java.lang.reflect.Method? = null
+
+    /** RESIZE_MODE_PRESERVE_WINDOW (1): keeps the app's window/surface, so moving doesn't relayout or relaunch it. */
     fun resize(taskId: Int, r: Rect): Boolean {
         val a = atm() ?: return false
         return runCatching {
-            val m = a.javaClass.methods.first { it.name == "resizeTask" && it.parameterTypes.size == 3 }
-            m.invoke(a, taskId, r, 0); true
+            val m = resizeM ?: a.javaClass.methods.first { it.name == "resizeTask" && it.parameterTypes.size == 3 }.also { resizeM = it }
+            m.invoke(a, taskId, r, 1); true
         }.getOrDefault(false)
+    }
+
+    // Binder calls run off the UI thread; only the newest requested bounds are applied (no queue build-up = no lag).
+    private val thread by lazy { android.os.HandlerThread("taskctl").apply { start() } }
+    private val worker by lazy { android.os.Handler(thread.looper) }
+    private val pending = java.util.concurrent.atomic.AtomicReference<Triple<Int, Rect, (() -> Unit)?>?>(null)
+
+    fun resizeAsync(taskId: Int, r: Rect, done: (() -> Unit)? = null) {
+        if (pending.getAndSet(Triple(taskId, Rect(r), done)) != null) return
+        worker.post {
+            val job = pending.getAndSet(null) ?: return@post
+            resize(job.first, job.second)
+            job.third?.invoke()
+        }
     }
 
     fun remove(taskId: Int): Boolean {

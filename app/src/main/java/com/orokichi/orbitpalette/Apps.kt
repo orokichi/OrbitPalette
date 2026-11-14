@@ -246,7 +246,7 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
     var minimized by mutableStateOf(false)
     var maximized by mutableStateOf(false)
     private var beforeMax = Rect(bounds)
-    private val barH get() = px(30f)
+    private val barH get() = px(32f)
     private val gripS get() = px(40f)
     private val params = svc.overlayParams(0, 0, android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
     private val gripParams = svc.overlayParams(0, 0, android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
@@ -265,7 +265,7 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
 
     private fun findTask() {
         if (!live) return
-        repeat(4) { i -> h.postDelayed({ if (taskId == null) taskId = TaskCtl.taskIdOf(app.cmp.packageName) }, 300L + i * 400L) }
+        repeat(5) { i -> h.postDelayed({ if (taskId == null) Thread { TaskCtl.taskIdOf(app.cmp.packageName)?.let { id -> h.post { taskId = id } } }.start() }, 250L + i * 400L) }
     }
 
     private fun place() {
@@ -287,13 +287,13 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
         runCatching { wm.updateViewLayout(g, gripParams) }
     }
 
-    /** Push the bounds to the real app window (throttled while dragging). */
-    private fun push(force: Boolean = false) {
-        val id = taskId ?: TaskCtl.taskIdOf(app.cmp.packageName)?.also { taskId = it } ?: return
-        val now = android.os.SystemClock.uptimeMillis()
-        if (!force && now - lastPush < 24) return
-        lastPush = now
-        TaskCtl.resize(id, Rect(bounds))
+    /**
+     * Push the bounds to the real app window on a worker thread (latest only), then move our bar/grip
+     * when the app has actually moved, so bar and app stay glued together instead of the bar running ahead.
+     */
+    private fun push(@Suppress("UNUSED_PARAMETER") force: Boolean = false) {
+        val id = taskId ?: run { place(); return }
+        TaskCtl.resizeAsync(id, bounds) { h.post { place() } }
     }
 
     fun moveBy(dx: Float, dy: Float) {
@@ -302,8 +302,7 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
         val nx = (bounds.left + dx.toInt()).coerceIn(-bounds.width() + px(60f), s.width() - px(60f))
         val ny = (bounds.top + dy.toInt()).coerceIn(barH, s.height() - px(60f))
         bounds.offsetTo(nx, ny); maximized = false
-        place()
-        if (live) push()
+        if (live && taskId != null) push() else place()
     }
 
     fun moveDone() {
@@ -315,8 +314,8 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
         val s = svc.screen()
         bounds.right = (bounds.right + dx.toInt()).coerceIn(bounds.left + px(160f), s.width())
         bounds.bottom = (bounds.bottom + dy.toInt()).coerceIn(bounds.top + px(160f), s.height())
-        maximized = false; place()
-        if (live) push()
+        maximized = false
+        if (live && taskId != null) push() else place()
     }
 
     fun resizeDone() { if (live) push(true) else relaunch() }
@@ -355,15 +354,33 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
     }
 }
 
-/** Corner grip at the app window's bottom-right: drag to resize (live with Shizuku). */
+/** Corner grip at the app window's bottom-right (Galaxy style L bracket): drag to resize. */
 @Composable
 fun AppGrip(f: AppFrame) {
     val cs = MaterialTheme.colorScheme
-    androidx.compose.foundation.Canvas(Modifier.fillMaxSize().rawDragFull(onEnd = { _, _ -> f.resizeDone() }) { dx, dy, _, _ -> f.resizeBy(dx, dy) }) {
+    var active by remember { mutableStateOf(false) }
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize().pointerInput(Unit) {
+        awaitEachGesture { awaitFirstDown(requireUnconsumed = false); active = true; while (awaitPointerEvent().changes.any { it.pressed }) {}; active = false }
+    }.rawDragFull(onEnd = { _, _ -> f.resizeDone() }) { dx, dy, _, _ -> f.resizeBy(dx, dy) }) {
+        // the window corner is at the center of this view
         val c = Offset(size.width / 2f, size.height / 2f)
-        drawCircle(cs.primary.copy(alpha = 0.25f), size.width / 2f)
-        drawArc(cs.primary, 270f, 180f, false, Offset(c.x - size.width * 0.3f, c.y - size.height * 0.3f), androidx.compose.ui.geometry.Size(size.width * 0.6f, size.height * 0.6f),
-            style = Stroke(3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        val arm = size.width * 0.38f
+        val w = (if (active) 6.dp else 4.5.dp).toPx()
+        val p = androidx.compose.ui.graphics.Path().apply {
+            moveTo(c.x - arm, c.y); lineTo(c.x - w, c.y)
+            quadraticTo(c.x, c.y, c.x, c.y - w); lineTo(c.x, c.y - arm)
+        }
+        drawPath(p, androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.25f), style = Stroke(w + 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        drawPath(p, if (active) cs.primary else androidx.compose.ui.graphics.Color.White, style = Stroke(w, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+    }
+}
+
+@Composable
+private fun BarBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onLong: (() -> Unit)? = null, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Box(Modifier.padding(start = 4.dp).size(24.dp).clip(CircleShape).background(cs.surfaceContainerLow)
+        .combinedClickable(onClick = onClick, onLongClick = onLong), contentAlignment = Alignment.Center) {
+        Icon(icon, desc, Modifier.size(15.dp), tint = cs.onSurfaceVariant)
     }
 }
 
@@ -379,21 +396,19 @@ fun AppBar(f: AppFrame) {
         }
         return
     }
-    var menu by remember { mutableStateOf(false) }
-    androidx.compose.material3.Surface(shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp), color = cs.surfaceContainerHigh, shadowElevation = 6.dp,
-        border = androidx.compose.foundation.BorderStroke(2.dp, cs.primary), modifier = Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().rawDragFull(onTap = { menu = !menu }, onEnd = { _, _ -> f.moveDone() }) { dx, dy, _, _ -> f.moveBy(dx, dy) })
-            Image(f.app.icon, null, Modifier.align(Alignment.CenterStart).padding(start = 10.dp).size(18.dp))
-            Box(Modifier.align(Alignment.Center).size(40.dp, 5.dp).background(cs.primary, CircleShape))
-            if (menu) androidx.compose.foundation.layout.Row(Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)) {
-                androidx.compose.material3.IconButton(onClick = { menu = false; f.minimize() }, modifier = Modifier.size(30.dp)) { Icon(Icons.Rounded.Remove, "最小化", Modifier.size(17.dp)) }
-                Box(Modifier.size(30.dp).clip(CircleShape).combinedClickable(onClick = { menu = false; f.toggleMax() },
-                    onLongClick = { menu = false; OverlayService.instance?.drawRect("新しいサイズを▢で描く") { r -> f.resizeTo(r) } }), contentAlignment = Alignment.Center) {
-                    Icon(if (f.maximized) Icons.Rounded.CloseFullscreen else Icons.Rounded.OpenInFull, "全画面（長押しでサイズを描く）", Modifier.size(17.dp))
-                }
-                androidx.compose.material3.IconButton(onClick = { f.close() }, modifier = Modifier.size(30.dp)) { Icon(Icons.Rounded.Close, "閉じる", Modifier.size(17.dp)) }
+    androidx.compose.material3.Surface(shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp), color = cs.surfaceContainerHighest, shadowElevation = 4.dp,
+        modifier = Modifier.fillMaxSize()) {
+        androidx.compose.foundation.layout.Row(Modifier.fillMaxSize().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Image(f.app.icon, null, Modifier.size(20.dp))
+            // drag area = everything between the icon and the buttons, handle pill in the middle
+            Box(Modifier.weight(1f).fillMaxHeight().rawDragFull(onEnd = { _, _ -> f.moveDone() }) { dx, dy, _, _ -> f.moveBy(dx, dy) },
+                contentAlignment = Alignment.Center) {
+                Box(Modifier.size(36.dp, 4.dp).background(cs.onSurfaceVariant.copy(alpha = 0.6f), CircleShape))
             }
+            BarBtn(Icons.Rounded.Remove, "最小化") { f.minimize() }
+            BarBtn(if (f.maximized) Icons.Rounded.CloseFullscreen else Icons.Rounded.OpenInFull, "全画面（長押しでサイズを描く）",
+                onLong = { OverlayService.instance?.drawRect("新しいサイズを▢で描く") { r -> f.resizeTo(r) } }) { f.toggleMax() }
+            BarBtn(Icons.Rounded.Close, "閉じる") { f.close() }
         }
     }
 }
