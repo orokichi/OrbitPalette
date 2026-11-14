@@ -136,6 +136,11 @@ object Apps {
         val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(cmp)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val o = ActivityOptions.makeBasic().setLaunchBounds(r)
+        // Hidden API: request freeform windowing mode (5) so the bounds are honoured.
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 28) org.lsposed.hiddenapibypass.HiddenApiBypass.addHiddenApiExemptions("Landroid/app/ActivityOptions;")
+            ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(o, 5)
+        }
         return runCatching { ctx.startActivity(i, o.toBundle()); true }.getOrDefault(false)
     }
 }

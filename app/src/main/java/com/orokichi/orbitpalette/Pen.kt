@@ -19,6 +19,18 @@ object PenPrefs {
     fun setPencil(c: Context, v: Boolean) = sp(c).edit().putBoolean("pencil", v).apply()
 }
 
+object UiPrefs {
+    private fun sp(c: Context) = c.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    fun bubble(c: Context) = sp(c).getBoolean("bubble", false)
+    fun bubbleDp(c: Context) = sp(c).getFloat("bubbleDp", 48f)
+    fun bubbleAlpha(c: Context) = sp(c).getFloat("bubbleAlpha", 1f)
+    fun bubbleSnap(c: Context) = sp(c).getBoolean("bubbleSnap", true)
+    fun doubleTap(c: Context) = sp(c).getBoolean("doubleTap", true)
+    fun set(c: Context, k: String, v: Any) = sp(c).edit().apply {
+        when (v) { is Boolean -> putBoolean(k, v); is Float -> putFloat(k, v) }
+    }.apply().also { OverlayService.instance?.onUiPrefsChanged() }
+}
+
 /**
  * Shared pen input for every drawing surface: uses all batched (historical) samples at sub-pixel
  * precision and filters jitter. Pencil mode: one continuous vibration whose strength follows the

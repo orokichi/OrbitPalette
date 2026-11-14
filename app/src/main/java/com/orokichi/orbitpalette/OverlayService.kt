@@ -119,19 +119,23 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     // ---------- Bubble ----------
-    private val bubbleSize get() = dp(48f).toInt()
+    private var bubbleSize = 0
 
     /** Floating button only as a fallback when accessibility (double-tap to open) is off. */
     fun showBubble() {
-        if (bubble != null || OrbitA11yService.enabled(this)) return
+        if (bubble != null) return
+        if (OrbitA11yService.enabled(this) && !UiPrefs.bubble(this)) return
+        bubbleSize = dp(UiPrefs.bubbleDp(this)).toInt()
         val s = screen()
         bubbleParams = overlayParams(bubbleSize, bubbleSize, LP.FLAG_NOT_FOCUSABLE or LP.FLAG_NOT_TOUCH_MODAL).apply {
             x = prefs.getInt("bx", s.width() - bubbleSize - dp(8f).toInt())
             y = prefs.getInt("by", s.height() / 3)
         }
-        val v = composeView { Bubble { onBubbleTouch(it) } }
+        val v = composeView { Bubble(UiPrefs.bubbleAlpha(this)) { onBubbleTouch(it) } }
         wm.addView(v, bubbleParams); bubble = v
     }
+
+    fun onUiPrefsChanged() { main.post { hideBubble(); if (paletteView == null && rectView == null && snoteView == null && loupeView == null) showBubble() } }
 
     fun hideBubble() { bubble?.let { runCatching { wm.removeView(it) } }; bubble = null }
 
@@ -166,7 +170,8 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
                 when {
                     dragMode -> {
                         val s = screen()
-                        bubbleParams.x = if (bubbleParams.x + bubbleSize / 2 < s.width() / 2) dp(4f).toInt() else s.width() - bubbleSize - dp(4f).toInt()
+                        if (UiPrefs.bubbleSnap(this)) bubbleParams.x = if (bubbleParams.x + bubbleSize / 2 < s.width() / 2) dp(4f).toInt() else s.width() - bubbleSize - dp(4f).toInt()
+                        else bubbleParams.x = bubbleParams.x.coerceIn(0, s.width() - bubbleSize)
                         bubbleParams.y = bubbleParams.y.coerceIn(dp(24f).toInt(), s.height() - bubbleSize - dp(24f).toInt())
                         bubble?.let { runCatching { wm.updateViewLayout(it, bubbleParams) } }
                         prefs.edit().putInt("bx", bubbleParams.x).putInt("by", bubbleParams.y).apply()

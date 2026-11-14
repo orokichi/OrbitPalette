@@ -133,6 +133,7 @@ fun Home() {
                 "開発者向けオプションで「フリーフォーム ウィンドウを有効にする」をオンにして再起動すると、Apps で囲んだサイズでアプリが開きます",
                 false
             ) { runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) } }
+            BubbleSettings()
             var pencil by remember { mutableStateOf(PenPrefs.pencil(ctx)) }
             Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
                 androidx.compose.foundation.layout.Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -219,6 +220,38 @@ class EditorActivity : ComponentActivity() {
 private val editColors = listOf(0xFFE53935.toInt(), 0xFFFFC107.toInt(), 0xFF43A047.toInt(), 0xFF1E88E5.toInt(), 0xFF000000.toInt(), 0xFFFFFFFF.toInt())
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BubbleSettings() {
+    val ctx = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    var on by remember { mutableStateOf(UiPrefs.bubble(ctx)) }
+    var dbl by remember { mutableStateOf(UiPrefs.doubleTap(ctx)) }
+    var size by remember { mutableStateOf(UiPrefs.bubbleDp(ctx)) }
+    var alpha by remember { mutableStateOf(UiPrefs.bubbleAlpha(ctx)) }
+    var snap by remember { mutableStateOf(UiPrefs.bubbleSnap(ctx)) }
+    @Composable fun row(t: String, d: String, v: Boolean, f: (Boolean) -> Unit) =
+        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(t, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(d, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+            }
+            androidx.compose.material3.Switch(v, f)
+        }
+    Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            row("ダブルタップで起動", "画面のどこかをダブルタップでパレット（ユーザー補助が必要）", dbl) { dbl = it; UiPrefs.set(ctx, "doubleTap", it) }
+            row("フローティングボタン", "ボタンからパレットを開く方式も使う", on) { on = it; UiPrefs.set(ctx, "bubble", it) }
+            if (on) {
+                Text("サイズ ${size.toInt()}dp", style = MaterialTheme.typography.labelLarge)
+                Slider(size, { size = it }, valueRange = 32f..80f, onValueChangeFinished = { UiPrefs.set(ctx, "bubbleDp", size) })
+                Text("不透明度 ${(alpha * 100).toInt()}%", style = MaterialTheme.typography.labelLarge)
+                Slider(alpha, { alpha = it }, valueRange = 0.2f..1f, onValueChangeFinished = { UiPrefs.set(ctx, "bubbleAlpha", alpha) })
+                row("端に吸着", "離すと画面の左右端に寄せる", snap) { snap = it; UiPrefs.set(ctx, "bubbleSnap", it) }
+            }
+        }
+    }
+}
+
 @Composable
 fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
     val ctx = LocalContext.current

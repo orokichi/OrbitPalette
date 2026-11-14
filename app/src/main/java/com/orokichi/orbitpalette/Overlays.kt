@@ -65,9 +65,9 @@ import kotlin.math.sin
 // ================= Bubble =================
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun Bubble(onTouch: (MotionEvent) -> Unit) {
+fun Bubble(alpha: Float = 1f, onTouch: (MotionEvent) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxSize().padding(3.dp).pointerInteropFilter { onTouch(it); true }) {
+    Box(Modifier.fillMaxSize().padding(3.dp).graphicsLayer { this.alpha = alpha }.pointerInteropFilter { onTouch(it); true }) {
         Surface(shape = CircleShape, color = cs.primary, contentColor = cs.onPrimary, shadowElevation = 6.dp, modifier = Modifier.fillMaxSize()) {
             Box(contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.ic_pen), null, Modifier.size(24.dp)) }
         }

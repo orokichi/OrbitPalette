@@ -97,7 +97,7 @@ class OrbitA11yService : AccessibilityService() {
     private fun imeVisible() = runCatching { windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }.getOrDefault(false)
 
     private fun onUnlockedTap(foreign: Boolean) {
-        if (!foreign || OverlayService.instance == null || imeVisible()) { uCount = 0; h.removeCallbacks(firePalette); return }
+        if (!foreign || OverlayService.instance == null || !UiPrefs.doubleTap(this) || imeVisible()) { uCount = 0; h.removeCallbacks(firePalette); return }
         val now = SystemClock.uptimeMillis()
         val gap = now - uLast; uLast = now
         if (uBurst) { if (gap < 450) return; uBurst = false }
@@ -110,7 +110,7 @@ class OrbitA11yService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
-        OverlayService.instance?.hideBubble()
+        OverlayService.instance?.onUiPrefsChanged()
         ContextCompat.registerReceiver(this, rx, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
         }, ContextCompat.RECEIVER_EXPORTED)
