@@ -105,7 +105,8 @@ object Kana {
     fun feed(pending: String): Pair<String, String> {
         var r = pending.lowercase(); val out = StringBuilder()
         loop@ while (r.isNotEmpty()) {
-            roma[r]?.let { out.append(it); r = ""; break@loop }
+            val hit = roma[r]
+            if (hit != null) { out.append(hit); r = ""; break@loop }
             if (r.length >= 2 && r[0] == r[1] && r[0] !in "aiueon" && r[0].isLetter()) { out.append("っ"); r = r.drop(1); continue }
             if (r.length >= 2 && r[0] == 'n' && r[1] !in "aiueoyn'") { out.append("ん"); r = r.drop(1); continue }
             if (roma.keys.any { it.startsWith(r) }) break
