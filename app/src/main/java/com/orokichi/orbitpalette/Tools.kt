@@ -296,6 +296,8 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val pen = remember { PenTracker(view, ctx) }
     LaunchedEffect(Unit) { if (st.smart) InkRecognizer.prepare() }
     val job = remember { arrayOfNulls<Job>(1) }
     var current by remember { mutableStateOf<InkStroke?>(null) }
@@ -340,14 +342,14 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
                             return@awaitEachGesture
                         }
                         val s = InkStroke(st.color, with(density) { st.penDp.dp.toPx() })
-                        s.add(down.position, down.uptimeMillis); current = s; st.tick++
+                        s.add(pen.begin(this, down), down.uptimeMillis); current = s; st.tick++
                         while (true) {
                             val ev = awaitPointerEvent()
                             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
                             if (!c.pressed) break
-                            s.add(c.position, c.uptimeMillis); c.consume(); st.tick++
+                            pen.move(this, c).forEach { s.add(it, c.uptimeMillis) }; c.consume(); st.tick++
                         }
-                        current = null
+                        pen.end(); current = null
                         val b = s.bounds()
                         if (st.smart && b.width < 14f && b.height < 14f) {
                             val hit = st.groups.lastOrNull { it.links.isNotEmpty() && it.bounds.inflate(28f).contains(b.center) }
@@ -368,7 +370,7 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
                     drawIntoCanvas { cv ->
                         val n = cv.nativeCanvas
                         st.strokes.forEach { s -> n.drawPath(smoothPath(s.pts), strokePaint(if (s.color == 0) ink else s.color, s.width)) }
-                        current?.let { s -> n.drawPath(smoothPath(s.pts), strokePaint(if (s.color == 0) ink else s.color, s.width)) }
+                        current?.let { s -> n.drawPath(smoothPath(pen.predicted?.let { s.pts + it } ?: s.pts), strokePaint(if (s.color == 0) ink else s.color, s.width)) }
                     }
                     if (st.smart) st.groups.forEach { g ->
                         if (g.links.isNotEmpty()) {

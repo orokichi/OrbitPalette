@@ -23,6 +23,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -126,6 +128,16 @@ fun Home() {
                 Spacer(Modifier.width(10.dp))
                 Text(if (running) "パレットを停止" else "パレットを開始", style = MaterialTheme.typography.titleLarge)
             }
+            var pencil by remember { mutableStateOf(PenPrefs.pencil(ctx)) }
+            Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
+                androidx.compose.foundation.layout.Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("鉛筆機能", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("書いている間、紙に書くような細かい振動を加えます", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    }
+                    androidx.compose.material3.Switch(pencil, { pencil = it; PenPrefs.setPencil(ctx, it) })
+                }
+            }
             Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("使い方", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -211,6 +223,9 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
     val marks = remember { mutableStateListOf<Mark>() }
     val redo = remember { mutableStateListOf<Mark>() }
     val live = remember { mutableStateListOf<Offset>() }
+    var predicted by remember { mutableStateOf<Offset?>(null) }
+    val view = androidx.compose.ui.platform.LocalView.current
+    val pen = remember { PenTracker(view, ctx) }
     var tool by remember { mutableStateOf(EditTool.PEN) }
     var color by remember { mutableIntStateOf(editColors[0]) }
     var dialog by remember { mutableStateOf<Pair<Offset, Int>?>(null) } // position, index (-1 = new)
@@ -307,14 +322,19 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
                             val ip = p / scale
                             val idx = marks.indexOfLast { it is TextMark && hitText(it, ip) }
                             dialog = ip to idx
-                        } else detectDragGestures(
-                            onDragStart = { live.clear(); live.add(it / scale) },
-                            onDrag = { c, _ -> live.add(c.position / scale) },
-                            onDragEnd = {
-                                marks.add(liveMark(live.toList()))
-                                redo.clear(); live.clear()
+                        } else awaitEachGesture {
+                            val down = awaitFirstDown(); down.consume()
+                            live.clear(); live.add(pen.begin(this, down) / scale)
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!c.pressed) break
+                                pen.move(this, c).forEach { live.add(it / scale) }; predicted = pen.predicted?.div(scale); c.consume()
                             }
-                        )
+                            pen.end(); predicted = null
+                            if (live.size > 0) marks.add(liveMark(live.toList()))
+                            redo.clear(); live.clear()
+                        }
                     }
                     .pointerInput(tool) {
                         if (tool != EditTool.TEXT) return@pointerInput
@@ -332,7 +352,7 @@ fun EditorScreen(bmp: Bitmap, onClose: () -> Unit) {
                             val n = cv.nativeCanvas
                             n.saveLayer(null, null); n.scale(scale, scale)
                             marks.forEach { drawMark(n, it) }
-                            if (live.isNotEmpty()) drawMark(n, liveMark(live.toList()))
+                            if (live.isNotEmpty()) drawMark(n, liveMark(predicted?.let { live.toList() + it } ?: live.toList()))
                             n.restore()
                         }
                     }

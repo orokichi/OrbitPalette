@@ -220,8 +220,33 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
 
     /** One screenshot: accessibility (no prompt) when enabled, else MediaProjection. */
     fun captureOnce(cb: (android.graphics.Bitmap?) -> Unit) {
-        val a11y = OrbitA11yService.instance
-        if (a11y != null) { main.postDelayed({ a11y.shoot(cb) }, 300); return }
+        withA11y { a11y -> if (a11y != null) main.postDelayed({ a11y.shoot(cb) }, 300) else projectCb(cb) }
+    }
+
+    /**
+     * Accessibility may be enabled but not (re)bound yet, e.g. after the process was killed overnight.
+     * Wait for it instead of falling back to the MediaProjection consent dialog.
+     */
+    private fun withA11y(block: (OrbitA11yService?) -> Unit) {
+        OrbitA11yService.instance?.let { block(it); return }
+        if (!OrbitA11yService.enabled(this)) { block(null); return }
+        val start = android.os.SystemClock.uptimeMillis()
+        val poll = object : Runnable {
+            override fun run() {
+                val i = OrbitA11yService.instance
+                if (i != null) block(i)
+                else if (android.os.SystemClock.uptimeMillis() - start > 4000) {
+                    android.widget.Toast.makeText(this@OverlayService, "ユーザー補助が停止中です。設定でオフ→オンしてください", android.widget.Toast.LENGTH_LONG).show()
+                    runCatching { startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    block(null)
+                } else main.postDelayed(this, 100)
+            }
+        }
+        main.post(poll)
+    }
+
+    private fun projectCb(cb: (android.graphics.Bitmap?) -> Unit) {
+        if (OrbitA11yService.enabled(this)) { cb(null); return }
         captureCb = cb
         main.postDelayed({
             startActivity(Intent(this, ProjectionActivity::class.java).putExtra("mode", "cb")
@@ -233,7 +258,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
 
     private fun project(mode: String) {
         hideBubble()
-        if (OrbitA11yService.instance == null) {
+        if (!OrbitA11yService.enabled(this)) {
             main.postDelayed({
                 startActivity(Intent(this, ProjectionActivity::class.java).putExtra("mode", mode)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))

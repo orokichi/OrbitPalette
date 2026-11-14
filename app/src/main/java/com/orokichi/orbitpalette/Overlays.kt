@@ -357,6 +357,9 @@ fun ScreenNoteOverlay(bmp: Bitmap, onAdd: (Bitmap) -> Unit, onCancel: () -> Unit
     val cs = MaterialTheme.colorScheme
     val img = remember { bmp.asImageBitmap() }
     val lasso = remember { mutableStateListOf<Offset>() }
+    val pctx = androidx.compose.ui.platform.LocalContext.current
+    val pview = androidx.compose.ui.platform.LocalView.current
+    val pen = remember { PenTracker(pview, pctx) }
     var sel by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var vs by remember { mutableStateOf(IntSize.Zero) }
     fun norm(r: androidx.compose.ui.geometry.Rect) = androidx.compose.ui.geometry.Rect(
@@ -371,7 +374,7 @@ fun ScreenNoteOverlay(bmp: Bitmap, onAdd: (Bitmap) -> Unit, onCancel: () -> Unit
                 val k = listOf(s0.topLeft, s0.topRight, s0.bottomLeft, s0.bottomRight).indexOfFirst { (it - down.position).getDistance() < hr }
                 if (k >= 0) k else if (s0.contains(down.position)) 4 else -1
             }
-            if (mode == -1) { sel = null; lasso.clear(); lasso.add(down.position) }
+            if (mode == -1) { sel = null; lasso.clear(); lasso.add(pen.begin(this, down)) }
             var last = down.position
             while (true) {
                 val ev = awaitPointerEvent()
@@ -380,7 +383,7 @@ fun ScreenNoteOverlay(bmp: Bitmap, onAdd: (Bitmap) -> Unit, onCancel: () -> Unit
                 val p = c.position; val d = p - last; last = p; c.consume()
                 val r = sel
                 when {
-                    mode == -1 -> lasso.add(p)
+                    mode == -1 -> lasso.addAll(pen.move(this, c))
                     r == null -> {}
                     mode == 4 -> sel = r.translate(d)
                     mode == 0 -> sel = r.copy(left = p.x, top = p.y)
