@@ -103,6 +103,21 @@ object InkRecognizer {
         }
     }
 
+    /** Fast upright recognition for live handwriting input: top candidates, using the text before the cursor as context. */
+    suspend fun candidates(strokes: List<InkStroke>, pre: String = ""): List<String> {
+        val r = recognizer ?: return emptyList()
+        if (!ready || strokes.isEmpty()) return emptyList()
+        val ink = Ink.builder()
+        strokes.forEach { st ->
+            val sb = Ink.Stroke.builder()
+            st.pts.forEachIndexed { i, p -> sb.addPoint(Ink.Point.create(p.x, p.y, st.times[i])) }
+            ink.addStroke(sb.build())
+        }
+        val rc = com.google.mlkit.vision.digitalink.RecognitionContext.builder().setPreContext(pre.takeLast(20)).build()
+        return runCatching { r.recognize(ink.build(), rc).await() }.getOrNull()?.candidates
+            ?.map { it.text }?.filter { it.isNotBlank() }?.distinct()?.take(6) ?: emptyList()
+    }
+
     /** Recognize regardless of writing direction: try several rotations and keep the most confident result. */
     suspend fun recognize(strokes: List<InkStroke>): String {
         val r = recognizer ?: return ""
@@ -307,8 +322,9 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
     val outline = cs.outlineVariant
 
     Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
         Box(
-            Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged { st.size = it }
+            Modifier.fillMaxSize().onSizeChanged { st.size = it }
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(); down.consume()
@@ -380,7 +396,7 @@ fun CanvasTool(st: CanvasState, full: Boolean = false, onClose: (() -> Unit)? = 
                     }
                     eraserPos?.let { drawCircle(accent, st.eraserDp.dp.toPx(), it, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx())) }
                 }
-        ) {
+        )
             if (!full) {
                 var converting by remember { mutableStateOf(false) }
                 Row(Modifier.align(Alignment.TopEnd).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -583,7 +599,9 @@ fun NoteTool() {
                 cursorBrush = SolidColor(cs.primary),
                 modifier = Modifier.fillMaxSize().padding(16.dp).focusRequester(fr)
             )
-            LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
+            val wf = androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
+            val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+            LaunchedEffect(wf) { runCatching { fr.requestFocus(); if (wf) kb?.show() } }
         } else {
             val links = remember(text) { LinkDetector.detect(text) }
             val style = TextLinkStyles(SpanStyle(color = cs.primary, textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Medium))

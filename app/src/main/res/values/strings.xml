@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">Android AirCommand</string>
-    <string name="a11y_desc">Android AirCommand の ScreenShot・TouchView・ScreenNote を毎回の確認なしで使うためと、ロック画面のダブルタップでメモを開くために使います。画面の内容を送信することはありません。</string>
+    <string name="app_name">Flux UI System</string>
+    <string name="a11y_desc">Flux UI System の ScreenShot・TouchView・ScreenNote を毎回の確認なしで使うためと、ロック画面のダブルタップでメモを開くために使います。画面の内容を送信することはありません。</string>
 </resources>

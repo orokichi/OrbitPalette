@@ -1,0 +1,4 @@
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype android:label="日本語 手書き" android:imeSubtypeLocale="ja_JP" android:imeSubtypeMode="keyboard" />
+</input-method>

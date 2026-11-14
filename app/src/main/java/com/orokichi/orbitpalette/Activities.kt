@@ -84,7 +84,7 @@ fun Home() {
     }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notif = it }
 
-    Scaffold(topBar = { LargeTopAppBar(title = { Text("Android AirCommand", fontWeight = FontWeight.Bold) }) }) { pad ->
+    Scaffold(topBar = { LargeTopAppBar(title = { Text("Flux UI System", fontWeight = FontWeight.Bold) }) }) { pad ->
         Column(
             Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -103,7 +103,7 @@ fun Home() {
             }
             PermissionCard(
                 "ユーザー補助（推奨）",
-                "ユーザー補助で「Android AirCommand」をオンにすると、ScreenShot・TouchView・ScreenNote が毎回の確認なしで使え、ロック画面のダブルタップで Note が開きます。オンにできない場合は「アプリ情報」右上の︙から「制限付き設定を許可」してください",
+                "ユーザー補助で「Flux UI System」をオンにすると、ScreenShot・TouchView・ScreenNote が毎回の確認なしで使え、ロック画面のダブルタップで Note が開きます。オンにできない場合は「アプリ情報」右上の︙から「制限付き設定を許可」してください",
                 a11y, extra = "アプリ情報" to {
                     ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)))
                 }
@@ -133,6 +133,22 @@ fun Home() {
                 "開発者向けオプションで「フリーフォーム ウィンドウを有効にする」をオンにして再起動すると、Apps で囲んだサイズでアプリが開きます",
                 false
             ) { runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) } }
+            Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(FluxIcon, null, tint = cs.primary); Spacer(Modifier.width(10.dp))
+                        Text("Flux Search", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    Text("手書きでスマホ内をまとめて検索。Flux 手書きキーボードをデフォルトにすると、どの入力ボックスでも手書き入力できます", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { ctx.startActivity(Intent(ctx, FluxSearchActivity::class.java)) }) { Text("開く") }
+                        OutlinedButton(onClick = {
+                            if (!FluxEngine.imeEnabled(ctx)) runCatching { ctx.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                            else ctx.getSystemService(android.view.inputmethod.InputMethodManager::class.java).showInputMethodPicker()
+                        }) { Text("キーボードに設定") }
+                    }
+                }
+            }
             BubbleSettings()
             var pencil by remember { mutableStateOf(PenPrefs.pencil(ctx)) }
             Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
@@ -148,7 +164,7 @@ fun Home() {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("使い方", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     listOf(
-                        "画面のどこかをダブルタップでパレットを開き、ツールをタップ（ユーザー補助オン時）",
+                        "画面を2回タップし、2回目を2秒長押しでパレットを開き、ツールをタップ（ユーザー補助オン時）",
                         "Apps：▢を描くとその範囲にアプリ一覧、タップでそのサイズで起動",
                         "ウィンドウの▢を長押し→全部最小化→▢を描くとサイズ変更",
                         "ウィンドウはタイトルバーで移動、右下の角でサイズ変更",
@@ -238,7 +254,7 @@ private fun BubbleSettings() {
         }
     Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            row("ダブルタップで起動", "画面のどこかをダブルタップでパレット（ユーザー補助が必要）", dbl) { dbl = it; UiPrefs.set(ctx, "doubleTap", it) }
+            row("タップ＋長押しで起動", "画面をトンと叩き、2回目をそのまま2秒長押しでパレット（ユーザー補助が必要）。ロック画面メモはダブルタップのまま", dbl) { dbl = it; UiPrefs.set(ctx, "doubleTap", it) }
             row("フローティングボタン", "ボタンからパレットを開く方式も使う", on) { on = it; UiPrefs.set(ctx, "bubble", it) }
             if (on) {
                 Text("サイズ ${size.toInt()}dp", style = MaterialTheme.typography.labelLarge)

@@ -264,8 +264,11 @@ class FloatingWindow(
     private val root = object : FrameLayout(svc) {
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
             if (ev.actionMasked == MotionEvent.ACTION_OUTSIDE) { focus(false); return false }
-            if (ev.actionMasked == MotionEvent.ACTION_DOWN) focus(true)
-            return super.dispatchTouchEvent(ev)
+            // Changing window flags mid-gesture makes the system cancel the touch (buttons "don't press").
+            // So become focusable only after the finger lifts.
+            val r = super.dispatchTouchEvent(ev)
+            if (ev.actionMasked == MotionEvent.ACTION_UP) post { focus(true) }
+            return r
         }
         override fun dispatchKeyEvent(event: KeyEvent): Boolean {
             if (event.keyCode == KeyEvent.KEYCODE_BACK) { if (event.action == KeyEvent.ACTION_UP) focus(false); return true }
@@ -388,10 +391,10 @@ fun WindowChrome(w: FloatingWindow) {
                 ) { Icon(if (w.maximized) Icons.Rounded.FilterNone else Icons.Rounded.CropSquare, "最大化（長押しでサイズを描く）", Modifier.size(18.dp)) }
                 ChromeButton(Icons.Rounded.Close, "閉じる") { w.close() }
             }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                w.body()
-                if (!w.maximized) Canvas(
-                    Modifier.align(Alignment.BottomEnd).size(30.dp).rawDrag { dx, dy -> w.resizeBy(dx, dy) }
+            Box(Modifier.weight(1f).fillMaxWidth()) { w.body() }
+            if (!w.maximized) Box(Modifier.fillMaxWidth().height(18.dp)) {
+                Canvas(
+                    Modifier.align(Alignment.BottomEnd).size(18.dp).rawDrag { dx, dy -> w.resizeBy(dx, dy) }
                 ) {
                     val c = cs.outline; val s = size.width
                     drawLine(c, Offset(s * 0.35f, s * 0.8f), Offset(s * 0.8f, s * 0.35f), 2.dp.toPx())

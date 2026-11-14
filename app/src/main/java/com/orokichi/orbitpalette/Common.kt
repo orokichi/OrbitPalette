@@ -73,11 +73,25 @@ fun OrbitTheme(content: @Composable () -> Unit) {
     )
 }
 
+/** Magnifier with a sparkle (Flux Search). */
+val FluxIcon: ImageVector by lazy {
+    ImageVector.Builder("flux", 24.dp, 24.dp, 24f, 24f).apply {
+        addPath(androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M10,4a6,6 0 1,0 0,12a6,6 0 1,0 0,-12zM10,6.2a3.8,3.8 0 1,1 0,7.6a3.8,3.8 0 1,1 0,-7.6z" +
+            "M14.2,15.6l1.4,-1.4l4.6,4.6a1,1 0 0,1 -1.4,1.4z").toNodes(), fill = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.Black),
+            pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd)
+        addPath(androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M18.5,1.5l0.9,2.1l2.1,0.9l-2.1,0.9l-0.9,2.1l-0.9,-2.1l-2.1,-0.9l2.1,-0.9z").toNodes(),
+            fill = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.Black))
+    }.build()
+}
+
 enum class Tool(val label: String, val icon: ImageVector) {
     SCREENSHOT("ScreenShot", Icons.Rounded.Screenshot),
     CANVAS("Note", Icons.Rounded.Draw),
     TOUCHVIEW("TouchView", Icons.Rounded.ZoomIn),
     APPS("Apps", Icons.Rounded.Apps),
+    FLUX("Flux Search", FluxIcon),
     CALC("電卓", Icons.Rounded.Calculate),
     NOTE("WriteNote", Icons.Rounded.EditNote);
 
@@ -88,7 +102,7 @@ object Notif {
     const val CH = "orbit"
     fun ensure(ctx: Context) {
         ctx.getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(NotificationChannel(CH, "Android AirCommand", NotificationManager.IMPORTANCE_LOW))
+            .createNotificationChannel(NotificationChannel(CH, "Flux UI System", NotificationManager.IMPORTANCE_LOW))
     }
 }
 

@@ -18,14 +18,14 @@ jobs:
         with:
           gradle-version: "8.11.1"
       - run: gradle :app:assembleRelease --stacktrace
-      - run: cp app/build/outputs/apk/release/app-release.apk OrbitPalette-v1.0.${{ github.run_number }}.apk
+      - run: cp app/build/outputs/apk/release/app-release.apk FluxUISystem-v1.0.${{ github.run_number }}.apk
       - uses: actions/upload-artifact@v4
         with:
           name: OrbitPalette-apk
-          path: OrbitPalette-*.apk
+          path: FluxUISystem-*.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: Orbit Palette v1.0.${{ github.run_number }}
-          files: OrbitPalette-*.apk
+          name: Flux UI System v1.0.${{ github.run_number }}
+          files: FluxUISystem-*.apk
           make_latest: true

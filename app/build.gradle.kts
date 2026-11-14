@@ -16,12 +16,21 @@ android {
         versionCode = run
         versionName = "1.0.$run"
     }
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("keystore/release.p12")
+            storePassword = "fluxui2026"
+            keyAlias = "flux"
+            keyPassword = "fluxui2026"
+            storeType = "pkcs12"
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

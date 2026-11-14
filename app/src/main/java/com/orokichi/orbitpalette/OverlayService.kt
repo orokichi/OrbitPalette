@@ -98,7 +98,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
         Notif.ensure(this)
         val stop = PendingIntent.getService(this, 0, Intent(this, OverlayService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(this, Notif.CH)
-            .setSmallIcon(R.drawable.ic_stat).setContentTitle("Android AirCommand 表示中").setOngoing(true)
+            .setSmallIcon(R.drawable.ic_stat).setContentTitle("Flux UI System 表示中").setOngoing(true)
             .addAction(0, "停止", stop).build()
         ServiceCompat.startForeground(this, 1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         showBubble()
@@ -221,6 +221,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
             Tool.SCREENSHOT -> project("shot")
             Tool.TOUCHVIEW -> project("loupe")
             Tool.APPS -> drawRect("アプリを開く範囲を▢で囲む") { r -> openApps(r) }
+            Tool.FLUX -> startActivity(Intent(this, FluxSearchActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
             else -> openWindow(t)
         }
     }
