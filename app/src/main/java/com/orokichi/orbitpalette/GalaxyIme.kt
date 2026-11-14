@@ -232,7 +232,7 @@ class FluxIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner {
         main.removeCallbacks(place); main.postDelayed(place, 60)
     }
 
-    private fun setMode(m: Int) { commitAll(); mode = m; prefs.edit().putInt("mode", m).apply(); if (m == 0) main.post(place) else removeLayer() }
+    private fun switchMode(m: Int) { commitAll(); mode = m; prefs.edit().putInt("mode", m).apply(); if (m == 0) main.post(place) else removeLayer() }
 
     // ---------------- composing / conversion ----------------
     private fun shown() = if (sel in cands.indices) cands[sel] else raw + roma
@@ -421,9 +421,9 @@ class FluxIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner {
         Row(Modifier.fillMaxWidth().height(46.dp), verticalAlignment = Alignment.CenterVertically) {
             if (list.isEmpty()) {
                 // Galaxy toolbar
-                ToolIcon(Icons.Rounded.Gesture, "手書き", mode == 0) { setMode(0) }
-                ToolIcon(Icons.Rounded.Dialpad, "10キー", mode == 1) { setMode(1) }
-                ToolIcon(Icons.Rounded.Keyboard, "QWERTY", mode == 2) { setMode(2) }
+                ToolIcon(Icons.Rounded.Gesture, "手書き", mode == 0) { switchMode(0) }
+                ToolIcon(Icons.Rounded.Dialpad, "10キー", mode == 1) { switchMode(1) }
+                ToolIcon(Icons.Rounded.Keyboard, "QWERTY", mode == 2) { switchMode(2) }
                 Spacer(Modifier.weight(1f))
                 ToolIcon(Icons.Rounded.KeyboardHide, "閉じる", false) { commitAll(); requestHideSelf(0) }
             } else Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
@@ -527,7 +527,7 @@ class FluxIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner {
                 Key(Modifier.weight(1f).fillMaxHeight(), if (composing) "変換" else "空白", kind = 1) { convertKey() }
             }
             Row(rowH) {
-                Key(Modifier.weight(1f).fillMaxHeight(), "手書き", Icons.Rounded.Gesture, 1) { setMode(0) }
+                Key(Modifier.weight(1f).fillMaxHeight(), "手書き", Icons.Rounded.Gesture, 1) { switchMode(0) }
                 (6..8).forEach { FlickKey(Modifier.weight(1f).fillMaxHeight(), keys[it], onChar) }
                 Key(Modifier.weight(1f).fillMaxHeight(), when (sub) { 0 -> "あ→A"; 1 -> "A→1"; else -> "1→あ" }, kind = 1) { commitAll(); sub = (sub + 1) % 3 }
             }
