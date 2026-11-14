@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -273,7 +274,7 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
         else {
             params.width = bounds.width(); params.height = barH
             params.x = bounds.left
-            params.y = (bounds.top - barH).coerceAtLeast(0)
+            params.y = (bounds.top - barH).coerceAtLeast(svc.topInset())
         }
         view?.let { runCatching { wm.updateViewLayout(it, params) } }
         placeGrip()
@@ -300,7 +301,7 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
         if (minimized) { params.x += dx.toInt(); params.y += dy.toInt(); view?.let { runCatching { wm.updateViewLayout(it, params) } }; return }
         val s = svc.screen()
         val nx = (bounds.left + dx.toInt()).coerceIn(-bounds.width() + px(60f), s.width() - px(60f))
-        val ny = (bounds.top + dy.toInt()).coerceIn(barH, s.height() - px(60f))
+        val ny = (bounds.top + dy.toInt()).coerceIn(svc.topInset() + barH, s.height() - px(60f))
         bounds.offsetTo(nx, ny); maximized = false
         if (live && taskId != null) push() else place()
     }
@@ -326,7 +327,7 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
 
     fun toggleMax() {
         val s = svc.screen()
-        if (!maximized) { beforeMax = Rect(bounds); bounds = Rect(0, px(28f) + barH, s.width(), s.height()); maximized = true }
+        if (!maximized) { beforeMax = Rect(bounds); bounds = Rect(0, svc.topInset() + barH, s.width(), svc.bottomSafe()); maximized = true }
         else { bounds = Rect(beforeMax); maximized = false }
         if (live) { push(true); place() } else relaunch()
     }

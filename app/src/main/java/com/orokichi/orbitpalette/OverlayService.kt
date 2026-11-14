@@ -73,6 +73,16 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
 
     fun dp(v: Float) = v * resources.displayMetrics.density
     fun screen(): Rect = wm.maximumWindowMetrics.bounds
+
+    private fun insets(): android.graphics.Insets = runCatching {
+        wm.maximumWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
+            android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.displayCutout() or android.view.WindowInsets.Type.navigationBars())
+    }.getOrDefault(android.graphics.Insets.NONE)
+
+    /** Safe top edge: below the status bar and the camera punch hole. */
+    fun topInset(): Int = maxOf(insets().top, dp(32f).toInt()) + dp(4f).toInt()
+    /** Bottom edge above the navigation bar / gesture handle. */
+    fun bottomSafe(): Int = screen().height() - insets().bottom
     fun windowCount() = windows.size
 
     fun overlayParams(w: Int, h: Int, flags: Int) = LP(

@@ -302,7 +302,7 @@ class FloatingWindow(
     fun moveBy(dx: Float, dy: Float) {
         val s = svc.screen()
         params.x = (params.x + dx.toInt()).coerceIn(-params.width + px(60), s.width() - px(60))
-        params.y = (params.y + dy.toInt()).coerceIn(0, s.height() - px(48))
+        params.y = (params.y + dy.toInt()).coerceIn(svc.topInset(), s.height() - px(48))
         update()
     }
 
@@ -330,7 +330,7 @@ class FloatingWindow(
         val s = svc.screen()
         if (!maximized) {
             save(beforeMax)
-            params.x = 0; params.y = px(28); params.width = s.width(); params.height = s.height() - px(28)
+            params.x = 0; params.y = svc.topInset(); params.width = s.width(); params.height = svc.bottomSafe() - svc.topInset()
         } else load(beforeMax)
         maximized = !maximized; menu = false; update()
     }
@@ -360,7 +360,7 @@ class FloatingWindow(
 
     fun clamp() {
         val s = svc.screen()
-        if (maximized) { params.x = 0; params.y = px(28); params.width = s.width(); params.height = s.height() - px(28) }
+        if (maximized) { params.x = 0; params.y = svc.topInset(); params.width = s.width(); params.height = svc.bottomSafe() - svc.topInset() }
         else {
             params.width = params.width.coerceAtMost(s.width()); params.height = params.height.coerceAtMost(s.height() - px(40))
             params.x = params.x.coerceIn(0, (s.width() - params.width).coerceAtLeast(0))
