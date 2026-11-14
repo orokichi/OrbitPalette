@@ -111,7 +111,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     override fun onDestroy() {
-        listOfNotNull(bubble, paletteView, loupeView, thumbView).forEach { runCatching { wm.removeView(it) } }
+        listOfNotNull(bubble, paletteView, loupeView, thumbView, rectView).forEach { runCatching { wm.removeView(it) } }
         windows.values.toList().forEach { it.close() }
         stopService(Intent(this, CaptureService::class.java))
         instance = null
@@ -121,8 +121,9 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     // ---------- Bubble ----------
     private val bubbleSize get() = dp(48f).toInt()
 
+    /** Floating button only as a fallback when accessibility (double-tap to open) is off. */
     fun showBubble() {
-        if (bubble != null) return
+        if (bubble != null || OrbitA11yService.enabled(this)) return
         val s = screen()
         bubbleParams = overlayParams(bubbleSize, bubbleSize, LP.FLAG_NOT_FOCUSABLE or LP.FLAG_NOT_TOUCH_MODAL).apply {
             x = prefs.getInt("bx", s.width() - bubbleSize - dp(8f).toInt())
@@ -179,11 +180,18 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     // ---------- Palette ----------
-    private fun openPalette() {
+    private fun openPalette() = openPaletteAt(bubbleParams.x + bubbleSize / 2f, bubbleParams.y + bubbleSize / 2f)
+
+    /** Double-tap anywhere (accessibility) opens the palette in the middle of the screen. */
+    fun openPaletteFromTap() {
+        if (paletteView != null || rectView != null || snoteView != null || loupeView != null) return
+        val s = screen(); openPaletteAt(s.width() / 2f, s.height() / 2f)
+    }
+
+    private fun openPaletteAt(cx: Float, cy: Float) {
         if (paletteView != null) return
         val s = screen()
         val r = dp(90f); val m = r + dp(48f)
-        val cx = bubbleParams.x + bubbleSize / 2f; val cy = bubbleParams.y + bubbleSize / 2f
         palette.center = Offset(cx.coerceIn(m, s.width() - m), cy.coerceIn(m, s.height() - m))
         palette.radius = r; palette.inner = dp(34f); palette.highlighted = null
         val p = overlayParams(LP.MATCH_PARENT, LP.MATCH_PARENT, LP.FLAG_NOT_FOCUSABLE).apply { x = 0; y = 0 }
@@ -206,6 +214,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
         when (t) {
             Tool.SCREENSHOT -> project("shot")
             Tool.TOUCHVIEW -> project("loupe")
+            Tool.APPS -> drawRect("アプリを開く範囲を▢で囲む") { r -> openApps(r) }
             else -> openWindow(t)
         }
     }
@@ -309,6 +318,39 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
             }
             windows.values.forEach { it.clamp() }
         }, 200)
+    }
+
+    // ---------- Draw a box (Apps / resize) ----------
+    private var rectView: View? = null
+
+    fun drawRect(hint: String, onRect: (Rect) -> Unit) {
+        if (rectView != null) return
+        hidePalette(); hideBubble()
+        val v = composeView { RectDrawOverlay(hint, { r -> endRect(); onRect(r) }, { endRect() }) }
+        wm.addView(v, overlayParams(LP.MATCH_PARENT, LP.MATCH_PARENT, LP.FLAG_NOT_FOCUSABLE).apply { x = 0; y = 0 }); rectView = v
+    }
+
+    private fun endRect() { rectView?.let { runCatching { wm.removeView(it) } }; rectView = null; showBubble() }
+
+    fun resizeByDrawing(w: FloatingWindow) {
+        vibrate()
+        windows.values.forEach { if (!it.minimized) it.minimize() }
+        drawRect("新しいサイズを▢で描く") { r -> w.setBounds(r); w.bringToFront() }
+    }
+
+    private fun openApps(r: Rect) {
+        windows[Tool.APPS]?.close()
+        val s = screen()
+        lateinit var w: FloatingWindow
+        w = FloatingWindow(this, Tool.APPS, 300, 380, false) {
+            AppsPicker(r, s) { a ->
+                w.close()
+                if (!Apps.freeformEnabled(this)) Toast.makeText(this, "フリーフォームが無効のため全画面で開きます（アプリの設定から有効化）", Toast.LENGTH_LONG).show()
+                Apps.launch(this, a.cmp, r)
+            }
+        }
+        w.setBounds(r)
+        windows[Tool.APPS] = w; w.show()
     }
 
     // ---------- Popup windows ----------

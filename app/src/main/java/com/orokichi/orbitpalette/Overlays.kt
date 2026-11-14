@@ -1,6 +1,9 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 package com.orokichi.orbitpalette
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.unit.sp
 import android.graphics.Paint
 import android.graphics.RectF
 import android.view.KeyEvent
@@ -128,7 +131,7 @@ fun PaletteOverlay(st: PaletteState, onTouch: (MotionEvent) -> Unit) {
             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(8.dp)) {
                 val h = st.highlighted
                 if (h == null) Icon(Icons.Rounded.Close, null, tint = cs.onSurfaceVariant)
-                else Text(h.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = cs.primary, textAlign = TextAlign.Center, maxLines = 2)
+                else Text(h.label, style = MaterialTheme.typography.labelMedium, fontSize = if (h.label.length > 7) 10.sp else 12.sp, fontWeight = FontWeight.Bold, color = cs.primary, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
             }
         }
     }
@@ -283,6 +286,14 @@ class FloatingWindow(
 
     fun restore() { minimized = false; load(beforeMin); update() }
 
+    /** Snap to a rectangle drawn on screen (screen coordinates). */
+    fun setBounds(r: android.graphics.Rect) {
+        minimized = false; maximized = false
+        params.x = r.left; params.y = r.top
+        params.width = r.width().coerceAtLeast(px(180)); params.height = r.height().coerceAtLeast(px(160))
+        save(beforeMin); update()
+    }
+
     fun close() { runCatching { wm.removeView(root) }; svc.onWindowClosed(tool) }
 
     fun setHidden(h: Boolean) { root.visibility = if (h) android.view.View.INVISIBLE else android.view.View.VISIBLE }
@@ -333,7 +344,13 @@ fun WindowChrome(w: FloatingWindow) {
                     Text(w.tool.label, style = MaterialTheme.typography.titleSmall, maxLines = 1)
                 }
                 ChromeButton(Icons.Rounded.Remove, "最小化") { w.minimize() }
-                ChromeButton(if (w.maximized) Icons.Rounded.FilterNone else Icons.Rounded.CropSquare, "最大化") { w.toggleMax() }
+                // tap: maximize / long-press: minimize all and draw a box to resize
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape).combinedClickable(
+                        onClick = { w.toggleMax() },
+                        onLongClick = { OverlayService.instance?.resizeByDrawing(w) }
+                    ), contentAlignment = Alignment.Center
+                ) { Icon(if (w.maximized) Icons.Rounded.FilterNone else Icons.Rounded.CropSquare, "最大化（長押しでサイズを描く）", Modifier.size(18.dp)) }
                 ChromeButton(Icons.Rounded.Close, "閉じる") { w.close() }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {

@@ -17,6 +17,7 @@ import android.view.MotionEvent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Calculate
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Draw
@@ -76,6 +77,7 @@ enum class Tool(val label: String, val icon: ImageVector) {
     SCREENSHOT("ScreenShot", Icons.Rounded.Screenshot),
     CANVAS("Note", Icons.Rounded.Draw),
     TOUCHVIEW("TouchView", Icons.Rounded.ZoomIn),
+    APPS("Apps", Icons.Rounded.Apps),
     CALC("電卓", Icons.Rounded.Calculate),
     NOTE("WriteNote", Icons.Rounded.EditNote);
 

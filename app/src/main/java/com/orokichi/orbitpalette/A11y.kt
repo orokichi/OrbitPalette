@@ -59,7 +59,7 @@ class OrbitA11yService : AccessibilityService() {
         if (lockView != null) return
         val v = object : View(this) {
             override fun onTouchEvent(e: MotionEvent): Boolean {
-                if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) onOutsideTap()
+                if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) { if (locked()) onOutsideTap() else onUnlockedTap(e.x == 0f && e.y == 0f) }
                 return false
             }
         }
@@ -86,8 +86,31 @@ class OrbitA11yService : AccessibilityService() {
         }
     }
 
+    // ---- Unlocked double-tap anywhere → palette ----
+    // Touches on other apps arrive with zeroed coordinates; our own windows report real ones and are ignored.
+    // Ignored while the keyboard is up; a burst of 3+ quick taps is treated as typing.
+    private var uCount = 0
+    private var uLast = 0L
+    private var uBurst = false
+    private val firePalette = Runnable { uCount = 0; OverlayService.instance?.openPaletteFromTap() }
+
+    private fun imeVisible() = runCatching { windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }.getOrDefault(false)
+
+    private fun onUnlockedTap(foreign: Boolean) {
+        if (!foreign || OverlayService.instance == null || imeVisible()) { uCount = 0; h.removeCallbacks(firePalette); return }
+        val now = SystemClock.uptimeMillis()
+        val gap = now - uLast; uLast = now
+        if (uBurst) { if (gap < 450) return; uBurst = false }
+        uCount = if (gap in 40..300) uCount + 1 else 1
+        when {
+            uCount == 2 -> h.postDelayed(firePalette, 300)
+            uCount >= 3 -> { h.removeCallbacks(firePalette); uCount = 0; uBurst = true }
+        }
+    }
+
     override fun onServiceConnected() {
         instance = this
+        OverlayService.instance?.hideBubble()
         ContextCompat.registerReceiver(this, rx, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
         }, ContextCompat.RECEIVER_EXPORTED)

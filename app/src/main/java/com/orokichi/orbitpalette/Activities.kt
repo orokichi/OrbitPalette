@@ -128,6 +128,11 @@ fun Home() {
                 Spacer(Modifier.width(10.dp))
                 Text(if (running) "パレットを停止" else "パレットを開始", style = MaterialTheme.typography.titleLarge)
             }
+            if (!Apps.freeformEnabled(ctx)) PermissionCard(
+                "Apps のウィンドウ表示",
+                "開発者向けオプションで「フリーフォーム ウィンドウを有効にする」をオンにして再起動すると、Apps で囲んだサイズでアプリが開きます",
+                false
+            ) { runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) } }
             var pencil by remember { mutableStateOf(PenPrefs.pencil(ctx)) }
             Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
                 androidx.compose.foundation.layout.Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -142,9 +147,9 @@ fun Home() {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("使い方", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     listOf(
-                        "ボタンを押したまま指をぐるっと回し、使いたいツールで指を離すと起動",
-                        "タップでパレットを開き、ツールをタップしても起動できます",
-                        "長押しでボタンを移動",
+                        "画面のどこかをダブルタップでパレットを開き、ツールをタップ（ユーザー補助オン時）",
+                        "Apps：▢を描くとその範囲にアプリ一覧、タップでそのサイズで起動",
+                        "ウィンドウの▢を長押し→全部最小化→▢を描くとサイズ変更",
                         "ウィンドウはタイトルバーで移動、右下の角でサイズ変更",
                         "スクリーンショットはサムネイルをタップで編集、保存ボタンでそのまま保存"
                     ).forEach { Text("・$it", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
