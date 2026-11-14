@@ -12,7 +12,6 @@ import android.view.View
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
-import kotlin.math.abs
 
 object PenPrefs {
     private fun sp(c: Context) = c.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -79,10 +78,9 @@ class PenTracker(@Suppress("unused") private val view: View, private val ctx: Co
 
     private fun feel() {
         lastMove = SystemClock.uptimeMillis()
-        // ~0.05 dp/ms (slow) → faint, ~2 dp/ms (fast) → stronger. Kept subtle.
-        val a = if (speed < 0.02f) 0 else (18 + speed * 45f).toInt().coerceIn(18, 110)
-        val now = lastMove
-        if ((abs(a - curAmp) >= 8 || (a == 0) != (curAmp == 0)) && now - lastSet >= 45) setAmp(a)
+        // Constant strength while the pen moves; off when it rests.
+        val a = if (speed < 0.02f) 0 else 40
+        if (a != curAmp && lastMove - lastSet >= 45) setAmp(a)
         h.removeCallbacks(idle); h.postDelayed(idle, 40)
     }
 
