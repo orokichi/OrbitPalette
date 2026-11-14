@@ -62,7 +62,6 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     lateinit var wm: WindowManager
     val main = Handler(Looper.getMainLooper())
     val palette = PaletteState()
-    val canvasState by lazy { CanvasState(this) }
     private val prefs by lazy { getSharedPreferences("overlay", MODE_PRIVATE) }
 
     private var bubble: View? = null
@@ -227,10 +226,11 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
         }
     }
 
+    /** Text (e.g. converted handwriting) goes into the Action Memo. */
     fun openNoteWith(t: String) {
-        NoteStore.init(this)
-        NoteStore.set(if (NoteStore.text.isBlank()) t else NoteStore.text.trimEnd() + "\n" + t)
-        openWindow(Tool.NOTE)
+        val w = windows[Tool.MEMO]
+        if (w == null) openMemo() else if (w.minimized) w.restore()
+        memoState.updateText(if (memoState.text.isBlank()) t else memoState.text.trimEnd() + "\n" + t)
     }
 
     private var captureCb: ((android.graphics.Bitmap?) -> Unit)? = null
@@ -297,7 +297,7 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     private var snoteView: View? = null
 
     fun startScreenNote() {
-        val w = windows[Tool.CANVAS] ?: return
+        val w = windows[Tool.MEMO] ?: return
         if (snoteView != null) return
         if (!w.minimized) w.minimize()
         w.setHidden(true); hideBubble()
@@ -306,8 +306,8 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
             if (bmp == null) { showBubble(); return@captureOnce }
             val v = composeView {
                 ScreenNoteOverlay(bmp,
-                    onAdd = { crop -> endScreenNote(); canvasState.addImage(crop); windows[Tool.CANVAS]?.let { if (it.minimized) it.restore() } },
-                    onCancel = { endScreenNote(); windows[Tool.CANVAS]?.let { if (it.minimized) it.restore() } })
+                    onAdd = { crop -> endScreenNote(); memoState.canvas.addImage(crop); memoState.canvas.moving = false; memoState.canvas.selected = null; windows[Tool.MEMO]?.let { if (it.minimized) it.restore() } },
+                    onCancel = { endScreenNote(); windows[Tool.MEMO]?.let { if (it.minimized) it.restore() } })
             }
             wm.addView(v, overlayParams(LP.MATCH_PARENT, LP.MATCH_PARENT, LP.FLAG_NOT_FOCUSABLE).apply { x = 0; y = 0 }); snoteView = v
             w.bringToFront()
@@ -367,9 +367,8 @@ class OverlayService : LifecycleService(), SavedStateRegistryOwner {
     private fun openWindow(t: Tool) {
         windows[t]?.let { if (it.minimized) it.restore(); return }
         val w = when (t) {
-            Tool.CANVAS -> FloatingWindow(this, t, 330, 440, false) { CanvasTool(canvasState) }
-            Tool.CALC -> FloatingWindow(this, t, 290, 420, false) { CalculatorTool() }
-            else -> FloatingWindow(this, t, 300, 380, true) { NoteTool() }
+            Tool.MEMO -> { openMemo(); return }
+            else -> FloatingWindow(this, t, 290, 420, false) { CalculatorTool() }
         }
         windows[t] = w; w.show()
     }

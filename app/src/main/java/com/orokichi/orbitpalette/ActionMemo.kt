@@ -195,6 +195,7 @@ fun ActionMemoTool(st: ActionMemoState) {
     val cs = MaterialTheme.colorScheme
     val paper = Color(st.bg)
     val fg = if (st.dark) Color(0xFFEDEDED) else Color(0xFF3A3A3A)
+    val convertScope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize().background(paper)) {
         // ---- toolbar ----
         Row(
@@ -210,6 +211,22 @@ fun ActionMemoTool(st: ActionMemoState) {
                 Toast.makeText(ctx, "操作したい文字を囲んでください", Toast.LENGTH_SHORT).show()
             }
             MemoToolButton(Icons.Rounded.Undo, "元に戻す", false, fg) { st.canvas.undo() }
+            MemoToolButton(Icons.Rounded.Crop, "ScreenNote（画面を切り取って貼る）", false, fg) { st.showList = false; OverlayService.instance?.startScreenNote() }
+            MemoToolButton(Icons.Rounded.FontDownload, "手書きをテキストに変換", false, fg) {
+                InkRecognizer.prepare()
+                if (st.canvas.strokes.isEmpty()) return@MemoToolButton
+                if (!InkRecognizer.ready) { Toast.makeText(ctx, "文字認識モデルを準備中です", Toast.LENGTH_SHORT).show(); return@MemoToolButton }
+                convertScope.launch {
+                    val t = InkRecognizer.recognize(st.canvas.strokes.toList())
+                    if (t.isBlank()) Toast.makeText(ctx, "文字を認識できませんでした", Toast.LENGTH_SHORT).show()
+                    else { st.updateText(if (st.text.isBlank()) t else st.text.trimEnd() + "\n" + t); st.canvas.clear(); st.mode = 3 }
+                }
+            }
+            MemoToolButton(Icons.Rounded.Save, "ギャラリーに保存", false, fg) {
+                val ok = Gallery.save(ctx, st.canvas.render(st.ink, st.bg), "ActionMemo")
+                Toast.makeText(ctx, if (ok) "保存しました" else "保存に失敗しました", Toast.LENGTH_SHORT).show()
+            }
+            MemoToolButton(Icons.Rounded.DeleteSweep, "全消去", false, fg) { st.canvas.clear(); st.updateText("") }
             MemoToolButton(Icons.Rounded.Palette, "背景色", st.showPaper, fg) { st.showPaper = !st.showPaper }
             MemoToolButton(Icons.Rounded.GridView, "メモ一覧", st.showList, fg) { st.showList = !st.showList; st.listTick++ }
             MemoToolButton(Icons.Rounded.Add, "新規メモ", false, fg) { st.fresh() }
@@ -225,6 +242,14 @@ fun ActionMemoTool(st: ActionMemoState) {
                 Box(Modifier.size(if (sel) 22.dp else 16.dp).clip(CircleShape).background(if (c == 0) Color(st.ink) else Color(c))
                     .clickable { st.canvas.color = c; st.mode = 0 })
             }
+        }
+        if (st.showPaper) Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (st.mode == 1) Icons.Rounded.AutoFixNormal else Icons.Rounded.Brush, null, Modifier.size(16.dp), tint = fg)
+            Slider(
+                value = if (st.mode == 1) st.canvas.eraserDp else st.canvas.penDp,
+                onValueChange = { if (st.mode == 1) st.canvas.eraserDp = it else st.canvas.penDp = it },
+                valueRange = if (st.mode == 1) 6f..60f else 1f..14f, modifier = Modifier.weight(1f).padding(start = 8.dp)
+            )
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (st.showList) MemoList(st) else MemoPage(st, fg)
@@ -309,6 +334,10 @@ private fun MemoPage(st: ActionMemoState, fg: Color) {
                 }
                 .drawBehind {
                     cv.tick
+                    cv.images.forEach { im ->
+                        val r = im.rect
+                        drawImage(im.ib, dstOffset = androidx.compose.ui.unit.IntOffset(r.left.toInt(), r.top.toInt()), dstSize = androidx.compose.ui.unit.IntSize(r.width.toInt(), r.height.toInt()))
+                    }
                     drawIntoCanvas { c ->
                         val n = c.nativeCanvas
                         cv.strokes.forEach { s -> n.drawPath(smoothPath(s.pts), strokePaint(if (s.color == 0) inkArgb else s.color, s.width)) }

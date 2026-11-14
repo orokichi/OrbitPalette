@@ -236,9 +236,9 @@ fun RectDrawOverlay(hint: String, onRect: (Rect) -> Unit, onCancel: () -> Unit) 
 }
 
 /**
- * Title bar pinned above a freeform app launched from Apps. Android doesn't let us control another app's
- * window directly, so: move/resize/maximize = relaunch with new bounds, minimize = Home (bar becomes a chip),
- * close = Back.
+ * Galaxy-style pop-up bar pinned above a freeform app launched from Apps.
+ * With Shizuku, the real app window follows the bar live (IActivityTaskManager.resizeTask) and the corner grip
+ * resizes it. Without Shizuku, Android gives us no control of another app's window, so we fall back to relaunching.
  */
 class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: Rect) {
     private val wm = svc.wm
@@ -247,39 +247,89 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
     var maximized by mutableStateOf(false)
     private var beforeMax = Rect(bounds)
     private val barH get() = px(30f)
+    private val gripS get() = px(40f)
     private val params = svc.overlayParams(0, 0, android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+    private val gripParams = svc.overlayParams(0, 0, android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
     private var view: android.view.View? = null
+    private var grip: android.view.View? = null
+    private var taskId: Int? = null
+    private var lastPush = 0L
+    private val h = android.os.Handler(android.os.Looper.getMainLooper())
+    val live get() = TaskCtl.granted()
 
-    fun show() { place(); view = svc.composeView { AppBar(this) }; wm.addView(view, params) }
+    fun show() {
+        place(); view = svc.composeView { AppBar(this) }; wm.addView(view, params)
+        grip = svc.composeView { AppGrip(this) }; wm.addView(grip, gripParams); placeGrip()
+        findTask()
+    }
+
+    private fun findTask() {
+        if (!live) return
+        repeat(4) { i -> h.postDelayed({ if (taskId == null) taskId = TaskCtl.taskIdOf(app.cmp.packageName) }, 300L + i * 400L) }
+    }
 
     private fun place() {
         if (minimized) { params.width = px(64f); params.height = px(64f); params.x = (bounds.right - px(64f)).coerceAtLeast(0); params.y = (bounds.top - barH).coerceAtLeast(0) }
         else {
             params.width = bounds.width(); params.height = barH
             params.x = bounds.left
-            params.y = if (bounds.top - barH >= 0) bounds.top - barH else bounds.top
+            params.y = (bounds.top - barH).coerceAtLeast(0)
         }
         view?.let { runCatching { wm.updateViewLayout(it, params) } }
+        placeGrip()
     }
 
-    fun moveBy(dx: Float, dy: Float) { params.x += dx.toInt(); params.y += dy.toInt(); view?.let { runCatching { wm.updateViewLayout(it, params) } } }
+    private fun placeGrip() {
+        val g = grip ?: return
+        g.visibility = if (minimized || maximized) android.view.View.GONE else android.view.View.VISIBLE
+        gripParams.width = gripS; gripParams.height = gripS
+        gripParams.x = bounds.right - gripS / 2; gripParams.y = bounds.bottom - gripS / 2
+        runCatching { wm.updateViewLayout(g, gripParams) }
+    }
+
+    /** Push the bounds to the real app window (throttled while dragging). */
+    private fun push(force: Boolean = false) {
+        val id = taskId ?: TaskCtl.taskIdOf(app.cmp.packageName)?.also { taskId = it } ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!force && now - lastPush < 24) return
+        lastPush = now
+        TaskCtl.resize(id, Rect(bounds))
+    }
+
+    fun moveBy(dx: Float, dy: Float) {
+        if (minimized) { params.x += dx.toInt(); params.y += dy.toInt(); view?.let { runCatching { wm.updateViewLayout(it, params) } }; return }
+        val s = svc.screen()
+        val nx = (bounds.left + dx.toInt()).coerceIn(-bounds.width() + px(60f), s.width() - px(60f))
+        val ny = (bounds.top + dy.toInt()).coerceIn(barH, s.height() - px(60f))
+        bounds.offsetTo(nx, ny); maximized = false
+        place()
+        if (live) push()
+    }
 
     fun moveDone() {
         if (minimized) return
-        val top = if (bounds.top - barH >= 0) params.y + barH else params.y
-        bounds = Rect(params.x, top, params.x + bounds.width(), top + bounds.height())
-        relaunch()
+        if (live) push(true) else relaunch()
     }
 
-    fun relaunch() { Apps.launch(svc, app.cmp, bounds); place() }
+    fun resizeBy(dx: Float, dy: Float) {
+        val s = svc.screen()
+        bounds.right = (bounds.right + dx.toInt()).coerceIn(bounds.left + px(160f), s.width())
+        bounds.bottom = (bounds.bottom + dy.toInt()).coerceIn(bounds.top + px(160f), s.height())
+        maximized = false; place()
+        if (live) push()
+    }
 
-    fun resizeTo(r: Rect) { bounds = Rect(r); maximized = false; minimized = false; relaunch() }
+    fun resizeDone() { if (live) push(true) else relaunch() }
+
+    fun relaunch() { Apps.launch(svc, app.cmp, bounds); place(); if (live) h.postDelayed({ push(true) }, 350) }
+
+    fun resizeTo(r: Rect) { bounds = Rect(r); maximized = false; minimized = false; if (live) { push(true); place() } else relaunch() }
 
     fun toggleMax() {
         val s = svc.screen()
-        if (!maximized) { beforeMax = Rect(bounds); bounds = Rect(0, px(44f) + px(28f), s.width(), s.height()); maximized = true }
+        if (!maximized) { beforeMax = Rect(bounds); bounds = Rect(0, px(28f) + barH, s.width(), s.height()); maximized = true }
         else { bounds = Rect(beforeMax); maximized = false }
-        relaunch()
+        if (live) { push(true); place() } else relaunch()
     }
 
     fun minimize() {
@@ -291,13 +341,30 @@ class AppFrame(private val svc: OverlayService, val app: AppEntry, var bounds: R
     fun restore() { minimized = false; relaunch() }
 
     fun close() {
+        val id = taskId
         remove()
+        if (id != null && TaskCtl.remove(id)) return
         val a = OrbitA11yService.instance ?: return
-        val h = android.os.Handler(android.os.Looper.getMainLooper())
         repeat(3) { i -> h.postDelayed({ a.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK) }, 80L + i * 150L) }
     }
 
-    fun remove() { view?.let { runCatching { wm.removeView(it) } }; view = null; svc.onAppFrameClosed(this) }
+    fun remove() {
+        view?.let { runCatching { wm.removeView(it) } }; view = null
+        grip?.let { runCatching { wm.removeView(it) } }; grip = null
+        svc.onAppFrameClosed(this)
+    }
+}
+
+/** Corner grip at the app window's bottom-right: drag to resize (live with Shizuku). */
+@Composable
+fun AppGrip(f: AppFrame) {
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize().rawDragFull(onEnd = { _, _ -> f.resizeDone() }) { dx, dy, _, _ -> f.resizeBy(dx, dy) }) {
+        val c = Offset(size.width / 2f, size.height / 2f)
+        drawCircle(cs.primary.copy(alpha = 0.25f), size.width / 2f)
+        drawArc(cs.primary, 270f, 180f, false, Offset(c.x - size.width * 0.3f, c.y - size.height * 0.3f), androidx.compose.ui.geometry.Size(size.width * 0.6f, size.height * 0.6f),
+            style = Stroke(3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+    }
 }
 
 @Composable

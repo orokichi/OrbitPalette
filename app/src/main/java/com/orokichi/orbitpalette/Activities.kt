@@ -103,7 +103,7 @@ fun Home() {
             }
             PermissionCard(
                 "ユーザー補助（推奨）",
-                "ユーザー補助で「Flux UI System」をオンにすると、ScreenShot・TouchView・ScreenNote が毎回の確認なしで使え、ロック画面のダブルタップで Note が開きます。オンにできない場合は「アプリ情報」右上の︙から「制限付き設定を許可」してください",
+                "ユーザー補助で「Flux UI System」をオンにすると、ScreenShot・TouchView・ScreenNote が毎回の確認なしで使え、ロック画面のダブルタップで画面オフメモが開きます。オンにできない場合は「アプリ情報」右上の︙から「制限付き設定を許可」してください",
                 a11y, extra = "アプリ情報" to {
                     ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)))
                 }
@@ -133,6 +133,16 @@ fun Home() {
                 "開発者向けオプションで「フリーフォーム ウィンドウを有効にする」をオンにして再起動すると、Apps で囲んだサイズでアプリが開きます",
                 false
             ) { runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) } }
+            var shz by remember { mutableStateOf(TaskCtl.granted()) }
+            LifecycleResumeEffect(Unit) { shz = TaskCtl.granted(); onPauseOrDispose { } }
+            PermissionCard(
+                "アプリウィンドウの移動・サイズ変更（Shizuku）",
+                "Apps で開いたアプリ本体をバーと一緒に動かす・角でサイズ変更するには Shizuku アプリを起動して許可してください（Android の制限で通常アプリには不可）",
+                shz, extra = "Shizukuを入手" to { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"))) } }
+            ) {
+                if (!TaskCtl.installed()) android.widget.Toast.makeText(ctx, "Shizuku を起動してから押してください", android.widget.Toast.LENGTH_LONG).show()
+                else TaskCtl.request()
+            }
             Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
@@ -166,8 +176,10 @@ fun Home() {
                     listOf(
                         "画面のどこかを3回タップでパレットを開き、ツールをタップ（ユーザー補助オン時）",
                         "Apps：▢を描くとその範囲にアプリ一覧、タップでそのサイズで起動",
-                        "ウィンドウの▢を長押し→全部最小化→▢を描くとサイズ変更",
-                        "ウィンドウはタイトルバーで移動、右下の角でサイズ変更",
+                        "ポップアップは上部のバーで移動、バーをタップで透明度・最小化・全画面・閉じる、左右下の角でサイズ変更",
+                        "最小化したアイコンは下のゴミ箱へドラッグで閉じる",
+                        "アクションメモ：手書き・テキスト・ScreenNote・リンク操作（囲んで電話/地図など）",
+                        "Flux キーボード：10キー/QWERTY/手書き、空白で漢字変換、手書きはこすって消去",
                         "スクリーンショットはサムネイルをタップで編集、保存ボタンでそのまま保存"
                     ).forEach { Text("・$it", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
                 }

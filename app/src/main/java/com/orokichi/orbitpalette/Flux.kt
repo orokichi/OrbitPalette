@@ -97,8 +97,11 @@ fun HandwritePad(
     onCommit: (String) -> Unit,
     onTap: ((Offset) -> Unit)? = null,
     inkWidthDp: Float = 4f,
+    onScratch: ((androidx.compose.ui.geometry.Rect) -> Unit)? = null,
+    clearKey: Int = 0,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
+    val onScratchU by rememberUpdatedState(onScratch)
     val onTapU by rememberUpdatedState(onTap)
     val cs = MaterialTheme.colorScheme
     val onPreview by rememberUpdatedState(onPreview)
@@ -112,6 +115,7 @@ fun HandwritePad(
     var best by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { InkRecognizer.prepare() }
     val inkColor = cs.primary.toArgb()
+    LaunchedEffect(clearKey) { if (clearKey != 0) { jobs[0]?.cancel(); jobs[1]?.cancel(); best = ""; strokes.clear(); tick++ } }
     fun commitNow() {
         jobs[0]?.cancel(); jobs[1]?.cancel()
         if (best.isNotEmpty()) onCommit(best)
@@ -134,6 +138,13 @@ fun HandwritePad(
             if (tap != null && strokes.isEmpty() && b.width < 12.dp.toPx() && b.height < 12.dp.toPx() && s.times.last() - s.times.first() < 300) {
                 tick++; tap(down.position); return@awaitEachGesture
             }
+            val sc = onScratchU
+            if (sc != null && isScratch(s, 8.dp.toPx())) {
+                // Galaxy-style scratch: erase pending ink, or delete the text under the stroke
+                if (strokes.isNotEmpty()) { jobs[0]?.cancel(); jobs[1]?.cancel(); best = ""; strokes.clear(); onPreview(emptyList()) }
+                else sc(b)
+                tick++; return@awaitEachGesture
+            }
             strokes.add(s); tick++
             jobs[0]?.cancel()
             jobs[0] = scope.launch {
@@ -153,221 +164,22 @@ fun HandwritePad(
     }) { content() }
 }
 
-// ======================= Flux keyboard (IME) =======================
-
-/**
- * Flux handwriting keyboard. Instead of a writing pad at the bottom (like Gboard), it lays a transparent
- * ink layer right over the text field you are typing into, so you write directly on the input box.
- * The bottom part is only a slim bar: live candidates + delete / space / enter / switch.
- * Field position comes from the accessibility service (focused node), or CursorAnchorInfo editor bounds.
- */
-class FluxIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner {
-    private val lr = LifecycleRegistry(this)
-    private val ssrc = SavedStateRegistryController.create(this)
-    override val lifecycle: Lifecycle get() = lr
-    override val savedStateRegistry: SavedStateRegistry get() = ssrc.savedStateRegistry
-    private var cands by mutableStateOf(listOf<String>())
-    private var composing = ""
-    private var padFallback by mutableStateOf(false)
-    private val main = android.os.Handler(android.os.Looper.getMainLooper())
-
-    private var layer: View? = null
-    private var layerWm: android.view.WindowManager? = null
-    private var layerParams: android.view.WindowManager.LayoutParams? = null
-    private var field: android.graphics.Rect? = null
-    private var anchorField: android.graphics.Rect? = null
-
-    override fun onCreate() {
-        super.onCreate()
-        ssrc.performRestore(null)
-        lr.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
-    }
-
-    override fun onDestroy() { removeLayer(); lr.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY); super.onDestroy() }
-
-    override fun onCreateInputView(): View {
-        window.window?.decorView?.let { it.setViewTreeLifecycleOwner(this); it.setViewTreeSavedStateRegistryOwner(this) }
-        return ComposeView(this).apply {
-            setViewTreeLifecycleOwner(this@FluxIme); setViewTreeSavedStateRegistryOwner(this@FluxIme)
-            setContent { OrbitTheme { ImePanel() } }
+/** Zig-zag "scratch out" stroke: several left/right reversals over a mostly horizontal area. */
+fun isScratch(s: InkStroke, minPx: Float): Boolean {
+    if (s.pts.size < 8) return false
+    val b = s.bounds()
+    if (b.width < minPx * 3 || b.height > b.width * 1.3f) return false
+    var ext = s.pts[0].x; var dir = 0; var rev = 0; var len = 0f
+    for (i in s.pts.indices) {
+        val x = s.pts[i].x
+        if (i > 0) len += (s.pts[i] - s.pts[i - 1]).getDistance()
+        when {
+            dir == 0 -> if (kotlin.math.abs(x - ext) > minPx) { dir = if (x > ext) 1 else -1; ext = x }
+            dir == 1 -> if (x > ext) ext = x else if (ext - x > minPx) { dir = -1; ext = x; rev++ }
+            else -> if (x < ext) ext = x else if (x - ext > minPx) { dir = 1; ext = x; rev++ }
         }
     }
-
-    override fun onEvaluateFullscreenMode() = false
-
-    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
-        composing = ""; cands = emptyList(); anchorField = null
-        InkRecognizer.prepare()
-        runCatching { currentInputConnection?.requestCursorUpdates(android.view.inputmethod.InputConnection.CURSOR_UPDATE_MONITOR or android.view.inputmethod.InputConnection.CURSOR_UPDATE_IMMEDIATE) }
-        main.removeCallbacks(place); main.postDelayed(place, 120); main.postDelayed(place, 450)
-    }
-
-    override fun onFinishInputView(finishingInput: Boolean) {
-        currentInputConnection?.finishComposingText(); composing = ""; removeLayer()
-    }
-
-    override fun onWindowHidden() { removeLayer() }
-
-    override fun onUpdateSelection(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) {
-        super.onUpdateSelection(a, b, c, d, e, f)
-        main.removeCallbacks(place); main.postDelayed(place, 60)
-    }
-
-    override fun onUpdateCursorAnchorInfo(info: android.view.inputmethod.CursorAnchorInfo) {
-        if (Build.VERSION.SDK_INT >= 33) info.editorBoundsInfo?.editorBounds?.let { rf ->
-            val r = android.graphics.RectF(rf); info.matrix.mapRect(r)
-            anchorField = android.graphics.Rect(r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
-        }
-        main.removeCallbacks(place); main.postDelayed(place, 60)
-    }
-
-    private fun dp(v: Float) = v * resources.displayMetrics.density
-
-    private val place = Runnable { placeLayer() }
-
-    /** Put (or move) the ink layer over the focused field. */
-    private fun placeLayer() {
-        if (!isInputViewShown) return
-        val r = OrbitA11yService.instance?.focusedInputBounds() ?: anchorField
-        if (r == null) { padFallback = true; removeLayer(); return }
-        padFallback = false
-        val sw = resources.displayMetrics.widthPixels
-        // A bit larger than the field so you can write big; at least ~120dp tall.
-        val padV = maxOf(dp(28f), (dp(120f) - r.height()) / 2f).toInt()
-        val x = (r.left - dp(12f).toInt()).coerceAtLeast(0)
-        val w = (r.right + dp(12f).toInt()).coerceAtMost(sw) - x
-        val y = (r.top - padV).coerceAtLeast(0)
-        val h = r.height() + padV * 2
-        val a11y = OrbitA11yService.instance
-        val wm = (a11y ?: this).getSystemService(android.view.WindowManager::class.java)
-        val type = if (a11y != null) android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
-            else if (Settings.canDrawOverlays(this)) android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else { padFallback = true; return }
-        field = r
-        val p = layerParams
-        if (layer != null && p != null && layerWm === wm && p.type == type) {
-            if (p.x != x || p.y != y || p.width != w || p.height != h) { p.x = x; p.y = y; p.width = w; p.height = h; runCatching { wm.updateViewLayout(layer, p) } }
-            return
-        }
-        removeLayer()
-        val np = android.view.WindowManager.LayoutParams(w, h, type,
-            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            android.graphics.PixelFormat.TRANSLUCENT).apply {
-            gravity = android.view.Gravity.TOP or android.view.Gravity.START; this.x = x; this.y = y
-            layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-        }
-        val v = ComposeView(this).apply {
-            setViewTreeLifecycleOwner(this@FluxIme); setViewTreeSavedStateRegistryOwner(this@FluxIme)
-            setContent { OrbitTheme { InkLayer() } }
-        }
-        if (runCatching { wm.addView(v, np) }.isSuccess) { layer = v; layerWm = wm; layerParams = np }
-    }
-
-    private fun removeLayer() {
-        main.removeCallbacks(place)
-        layer?.let { v -> runCatching { layerWm?.removeView(v) } }
-        layer = null; layerWm = null; layerParams = null
-    }
-
-    /** A tap (not a stroke) on the layer goes through to the app: move the cursor, press a button, etc. */
-    private fun passTap(pos: Offset) {
-        val p = layerParams ?: return
-        val v = layer ?: return
-        val wm = layerWm ?: return
-        p.flags = p.flags or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        runCatching { wm.updateViewLayout(v, p) }
-        OrbitA11yService.instance?.tapAt(p.x + pos.x, p.y + pos.y)
-        main.postDelayed({
-            if (layer === v) { p.flags = p.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv(); runCatching { wm.updateViewLayout(v, p) } }
-            main.postDelayed(place, 80)
-        }, 250)
-    }
-
-    private fun preview(c: List<String>) {
-        cands = c
-        val t = c.firstOrNull() ?: ""
-        composing = t
-        currentInputConnection?.setComposingText(t, 1)
-    }
-
-    private fun commit(t: String) {
-        val ic = currentInputConnection ?: return
-        ic.setComposingText(t, 1); ic.finishComposingText(); composing = ""
-    }
-
-    private fun backspace() {
-        val ic = currentInputConnection ?: return
-        if (composing.isNotEmpty()) { ic.setComposingText("", 1); composing = ""; cands = emptyList(); return }
-        val sel = ic.getSelectedText(0)
-        if (!sel.isNullOrEmpty()) ic.commitText("", 1) else ic.deleteSurroundingTextInCodePoints(1, 0)
-    }
-
-    private fun enter() {
-        val ic = currentInputConnection ?: return
-        ic.finishComposingText()
-        val ei = currentInputEditorInfo
-        val action = (ei?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
-        if (ei != null && (ei.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0 && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED)
-            ic.performEditorAction(action)
-        else { ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)); ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER)) }
-    }
-
-    private fun nextIme() {
-        if (!switchToNextInputMethod(false)) getSystemService(InputMethodManager::class.java).showInputMethodPicker()
-    }
-
-    private fun pre() = currentInputConnection?.getTextBeforeCursor(20, 0)?.toString() ?: ""
-
-    /** The transparent writing layer that sits on top of the text field. */
-    @Composable
-    private fun InkLayer() {
-        val cs = MaterialTheme.colorScheme
-        HandwritePad(
-            Modifier.fillMaxSize().border(1.5.dp, cs.primary.copy(alpha = 0.35f), RoundedCornerShape(14.dp)),
-            preContext = { pre() }, commitDelayMs = 750, inkWidthDp = 3.5f,
-            onPreview = { preview(it) }, onCommit = { commit(it); cands = emptyList() },
-            onTap = { passTap(it) }
-        )
-    }
-
-    @Composable
-    private fun ImePanel() {
-        val cs = MaterialTheme.colorScheme
-        Column(Modifier.fillMaxWidth().background(cs.surfaceContainer).navigationBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp)) {
-            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (cands.isEmpty()) {
-                        Icon(FluxIcon, null, tint = cs.primary, modifier = Modifier.padding(start = 6.dp).size(20.dp))
-                        Text(if (padFallback) " 下の枠に書く" else " 入力ボックスに直接書く", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-                    }
-                    cands.forEach { c ->
-                        Surface(shape = CircleShape, color = cs.secondaryContainer, modifier = Modifier.clip(CircleShape).clickable { commit(c); cands = emptyList() }) {
-                            Text(c, Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = MaterialTheme.typography.titleMedium)
-                        }
-                    }
-                }
-                ImeKey(Icons.AutoMirrored.Rounded.Backspace, "削除", Modifier.width(48.dp).fillMaxHeight()) { backspace() }
-                ImeKey(Icons.Rounded.SpaceBar, "スペース", Modifier.width(48.dp).fillMaxHeight()) { commit(" ") }
-                ImeKey(Icons.AutoMirrored.Rounded.KeyboardReturn, "改行", Modifier.width(48.dp).fillMaxHeight(), primary = true) { enter() }
-                ImeKey(Icons.Rounded.Language, "キーボード切替", Modifier.width(40.dp).fillMaxHeight()) { nextIme() }
-            }
-            // Only when the field's position can't be found (no accessibility / overlay permission).
-            if (padFallback) HandwritePad(
-                Modifier.padding(top = 4.dp).fillMaxWidth().height(180.dp).clip(RoundedCornerShape(20.dp)).background(cs.surfaceContainerHighest),
-                preContext = { pre() }, onPreview = { preview(it) }, onCommit = { commit(it); cands = emptyList() }
-            )
-        }
-    }
-}
-
-@Composable
-private fun ImeKey(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, modifier: Modifier, primary: Boolean = false, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Surface(onClick = onClick, shape = RoundedCornerShape(16.dp), color = if (primary) cs.primary else cs.surfaceContainerHigh,
-        contentColor = if (primary) cs.onPrimary else cs.onSurface, modifier = modifier.fillMaxWidth()) {
-        Box(contentAlignment = Alignment.Center) { Icon(icon, desc) }
-    }
+    return rev >= 3 && len > b.width * 2.5f
 }
 
 // ======================= Flux Search =======================

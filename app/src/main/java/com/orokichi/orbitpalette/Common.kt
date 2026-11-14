@@ -89,13 +89,12 @@ val FluxIcon: ImageVector by lazy {
 
 enum class Tool(val label: String, val icon: ImageVector) {
     SCREENSHOT("ScreenShot", Icons.Rounded.Screenshot),
-    CANVAS("Note", Icons.Rounded.Draw),
     TOUCHVIEW("TouchView", Icons.Rounded.ZoomIn),
     APPS("Apps", Icons.Rounded.Apps),
     FLUX("Flux Search", FluxIcon),
     MEMO("アクションメモ", Icons.Rounded.StickyNote2),
-    CALC("電卓", Icons.Rounded.Calculate),
-    NOTE("WriteNote", Icons.Rounded.EditNote);
+    CALC("電卓", Icons.Rounded.Calculate);
+
 
     val angleDeg: Float get() = -90f + ordinal * 360f / entries.size
 }

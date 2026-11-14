@@ -121,6 +121,23 @@ class OrbitA11yService : AccessibilityService() {
         android.graphics.Rect().also { n.getBoundsInScreen(it) }.takeIf { it.width() > 0 && it.height() > 0 }
     }.getOrNull()
 
+    /** Screen bounds of each character of the focused text field (for scratch-to-delete). */
+    fun focusedCharBounds(): Pair<Int, List<android.graphics.RectF?>>? = runCatching {
+        val n = findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+        val len = n.text?.length ?: return null
+        if (len == 0) return 0 to emptyList()
+        val start = (len - 1500).coerceAtLeast(0)
+        val key = android.view.accessibility.AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY
+        val args = android.os.Bundle().apply {
+            putInt(android.view.accessibility.AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_ARG_START_INDEX, start)
+            putInt(android.view.accessibility.AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_ARG_LENGTH, len - start)
+        }
+        if (!n.refreshWithExtraData(key, args)) return null
+        @Suppress("DEPRECATION")
+        val arr = n.extras.getParcelableArray(key) ?: return null
+        start to arr.map { it as? android.graphics.RectF }
+    }.getOrNull()
+
     /** Pass a tap through to whatever is under our handwriting layer. */
     fun tapAt(x: Float, y: Float) {
         tapThroughUntil = SystemClock.uptimeMillis() + 400
