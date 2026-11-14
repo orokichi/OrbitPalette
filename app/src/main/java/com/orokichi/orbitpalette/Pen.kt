@@ -10,7 +10,6 @@ import android.view.View
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.input.motionprediction.MotionEventPredictor
 
 object PenPrefs {
     private fun sp(c: Context) = c.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -24,7 +23,7 @@ object PenPrefs {
  * and (pencil mode) gives fine haptic grain while writing.
  */
 class PenTracker(private val view: View, private val ctx: Context) {
-    private val predictor = runCatching { MotionEventPredictor.newInstance(view) }.getOrNull()
+    private val hist = ArrayDeque<Triple<Float, Float, Long>>()
     private var pencil = false
     private var vib: Vibrator? = null
     private var travel = 0f
@@ -36,7 +35,7 @@ class PenTracker(private val view: View, private val ctx: Context) {
     var predicted: Offset? = null; private set
 
     fun begin(scope: AwaitPointerEventScope, down: PointerInputChange): Offset {
-        scope.currentEvent.motionEvent?.let { runCatching { predictor?.record(it) } }
+        hist.clear(); hist.addLast(Triple(down.position.x, down.position.y, down.uptimeMillis))
         pencil = PenPrefs.pencil(ctx)
         if (pencil && vib == null) {
             vib = if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(VibratorManager::class.java)?.defaultVibrator
@@ -52,23 +51,28 @@ class PenTracker(private val view: View, private val ctx: Context) {
         val out = ArrayList<Offset>(c.historical.size + 1)
         c.historical.forEach { add(out, it.position, it.uptimeMillis) }
         add(out, c.position, c.uptimeMillis)
-        val me = scope.currentEvent.motionEvent
-        predicted = null
-        if (me != null && predictor != null) runCatching {
-            predictor.record(me)
-            val idx = (0 until me.pointerCount).minByOrNull { (Offset(me.getX(it), me.getY(it)) - c.position).getDistanceSquared() } ?: 0
-            val delta = c.position - Offset(me.getX(idx), me.getY(idx))
-            predictor.predict()?.let { p ->
-                val pi = if (p.pointerCount > idx) idx else 0
-                val q = Offset(p.getX(pi), p.getY(pi)) + delta
-                p.recycle()
-                if ((q - c.position).getDistance() < 120f) predicted = q
-            }
-        }
+        hist.addLast(Triple(c.position.x, c.position.y, c.uptimeMillis))
+        while (hist.size > 2 && c.uptimeMillis - hist.first().third > 40) hist.removeFirst()
+        predicted = predict()
         return out
     }
 
-    fun end() { predicted = null; last = null }
+    fun end() { predicted = null; last = null; hist.clear() }
+
+    /** Extrapolates ~16 ms ahead from velocity over the last 40 ms (damped, capped) to hide display latency. */
+    private fun predict(): Offset? {
+        if (hist.size < 3) return null
+        val a = hist.first(); val b = hist.last()
+        val dt = (b.third - a.third).toFloat()
+        if (dt < 4f) return null
+        val vx = (b.first - a.first) / dt; val vy = (b.second - a.second) / dt
+        val k = 16f * 0.8f
+        var dx = vx * k; var dy = vy * k
+        val d = kotlin.math.hypot(dx, dy); val cap = 48f
+        if (d > cap) { dx *= cap / d; dy *= cap / d }
+        if (d < 0.5f) return null
+        return Offset(b.first + dx, b.second + dy)
+    }
 
     private fun add(out: MutableList<Offset>, p: Offset, t: Long) {
         val l = last
