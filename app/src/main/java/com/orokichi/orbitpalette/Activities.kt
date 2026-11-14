@@ -139,7 +139,7 @@ fun Home() {
                         Icon(FluxIcon, null, tint = cs.primary); Spacer(Modifier.width(10.dp))
                         Text("Flux Search", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
-                    Text("手書きでスマホ内をまとめて検索。Flux 手書きキーボードをデフォルトにすると、どの入力ボックスでも手書き入力できます", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    Text("手書きでスマホ内をまとめて検索。Flux 手書きキーボードをデフォルトにすると、どのアプリでも入力ボックスに直接手書きできます", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                     androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { ctx.startActivity(Intent(ctx, FluxSearchActivity::class.java)) }) { Text("開く") }
                         OutlinedButton(onClick = {
@@ -164,7 +164,7 @@ fun Home() {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("使い方", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     listOf(
-                        "画面を2回タップし、2回目を2秒長押しでパレットを開き、ツールをタップ（ユーザー補助オン時）",
+                        "画面のどこかを3回タップでパレットを開き、ツールをタップ（ユーザー補助オン時）",
                         "Apps：▢を描くとその範囲にアプリ一覧、タップでそのサイズで起動",
                         "ウィンドウの▢を長押し→全部最小化→▢を描くとサイズ変更",
                         "ウィンドウはタイトルバーで移動、右下の角でサイズ変更",
@@ -254,7 +254,7 @@ private fun BubbleSettings() {
         }
     Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            row("タップ＋長押しで起動", "画面をトンと叩き、2回目をそのまま2秒長押しでパレット（ユーザー補助が必要）。ロック画面メモはダブルタップのまま", dbl) { dbl = it; UiPrefs.set(ctx, "doubleTap", it) }
+            row("3回タップで起動", "画面のどこかを3回タップでパレット（ユーザー補助が必要）。ロック画面メモはダブルタップのまま", dbl) { dbl = it; UiPrefs.set(ctx, "doubleTap", it) }
             row("フローティングボタン", "ボタンからパレットを開く方式も使う", on) { on = it; UiPrefs.set(ctx, "bubble", it) }
             if (on) {
                 Text("サイズ ${size.toInt()}dp", style = MaterialTheme.typography.labelLarge)
